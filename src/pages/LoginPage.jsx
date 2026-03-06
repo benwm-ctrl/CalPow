@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [mode, setMode] = useState('signin') // 'signin' | 'signup'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -40,7 +41,8 @@ export default function LoginPage() {
           // Optional: update profile with display name etc. here if you add fields later
         }
       }
-      navigate('/map', { replace: true })
+      const from = location.state?.from ?? { pathname: '/' }
+      navigate(from, { replace: true })
     } catch (err) {
       setError(err.message || 'Something went wrong')
     } finally {

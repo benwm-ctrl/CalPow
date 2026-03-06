@@ -1,4 +1,4 @@
-import { useLocation, Routes, Route } from 'react-router-dom'
+import { useLocation, Routes, Route, Outlet } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import Navbar from './Navbar'
 import AuthGuard from './AuthGuard'
@@ -37,34 +37,21 @@ export default function AppContent() {
           <Routes location={location}>
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/map" element={<MapPage />} />
             <Route
-              path="/library"
               element={
                 <AuthGuard>
-                  <LibraryPage />
+                  <Outlet />
                 </AuthGuard>
               }
-            />
-            <Route
-              path="/library/:id"
-              element={
-                <AuthGuard>
-                  <RouteDetailPage />
-                </AuthGuard>
-              }
-            />
-            <Route path="/education" element={<EducationPage />} />
-            <Route path="/before-you-go" element={<BeforeYouGoPage />} />
-            <Route path="/mike" element={<MikePage />} />
-            <Route
-              path="/profile"
-              element={
-                <AuthGuard>
-                  <ProfilePage />
-                </AuthGuard>
-              }
-            />
+            >
+              <Route path="/map" element={<MapPage />} />
+              <Route path="/library" element={<LibraryPage />} />
+              <Route path="/library/:id" element={<RouteDetailPage />} />
+              <Route path="/education" element={<EducationPage />} />
+              <Route path="/before-you-go" element={<BeforeYouGoPage />} />
+              <Route path="/mike" element={<MikePage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+            </Route>
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </motion.div>
