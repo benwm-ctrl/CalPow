@@ -27,7 +27,7 @@ const AVALANCHE_CENTERS = [
 export default function HomePage() {
   return (
     <div className="bg-background-primary">
-      {/* Hero: tahoeYellow + overlay + mountain */}
+      {/* Hero: tahoeYellow + overlay */}
       <section className="relative min-h-screen flex flex-col items-center justify-center px-4 pt-0 pb-24 text-center overflow-hidden">
         <img
           src={tahoeYellow}
@@ -74,16 +74,6 @@ export default function HomePage() {
             );
           })}
         </div>
-        <svg
-          className="absolute bottom-0 left-0 w-full h-48 z-0"
-          viewBox="0 0 1200 120"
-          preserveAspectRatio="none"
-          aria-hidden
-        >
-          <path fill="#1E2D3D" d="M0 120 L0 75 L120 45 L280 85 L420 35 L580 70 L720 25 L880 60 L1000 40 L1200 80 L1200 120 Z" />
-          <path fill="#1E2D3D" opacity="0.85" d="M0 120 L180 55 L380 95 L600 50 L800 85 L1000 45 L1200 90 L1200 120 Z" />
-        </svg>
-
         <div className="relative z-10 max-w-4xl mx-auto" style={{ transform: 'translateY(-144px)', marginBottom: '48px' }}>
           <h1 className="text-6xl sm:text-7xl md:text-8xl lg:text-[96px] font-bold text-white tracking-tight">
             CalPow
