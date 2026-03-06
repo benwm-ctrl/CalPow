@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuthStore } from '../store/authStore'
+import { supabase } from '../services/supabase'
 import { LogOut, User, Menu, X, Settings } from 'lucide-react'
 
 const navLinks = [
@@ -31,11 +32,20 @@ export default function Navbar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, signOut } = useAuthStore()
+  const [profile, setProfile] = useState(null)
   const [visible, setVisible] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
   const dropdownRef = useRef(null)
+
+  useEffect(() => {
+    if (!user?.id) {
+      setProfile(null)
+      return
+    }
+    supabase.from('profiles').select('avatar_url, username').eq('id', user.id).maybeSingle().then(({ data }) => setProfile(data))
+  }, [user?.id, location.pathname])
 
   useEffect(() => {
     if (location.pathname !== '/') {
@@ -126,9 +136,6 @@ export default function Navbar() {
 
           {/* Desktop nav */}
           <div className="hidden md:flex items-center justify-between flex-1 gap-4">
-            <Link to="/" className={linkClass('/')}>
-              Home
-            </Link>
             {navLinks.map(({ to, label }) => (
               <Link key={to} to={to} className={linkClass(to)}>
                 {label}
@@ -140,18 +147,24 @@ export default function Navbar() {
                 <button
                   type="button"
                   onClick={() => setDropdownOpen((o) => !o)}
-                  className="flex items-center justify-center w-9 h-9 rounded-full bg-accent-blue text-text-primary font-medium text-sm hover:opacity-90 transition-opacity"
+                  className="flex items-center justify-center w-9 h-9 rounded-full overflow-hidden bg-accent-blue text-text-primary font-medium text-sm hover:opacity-90 transition-opacity shrink-0"
                   aria-expanded={dropdownOpen}
                   aria-haspopup="true"
                 >
-                  <motion.span whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                    {getInitials(user)}
-                  </motion.span>
+                  {profile?.avatar_url ? (
+                    <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <motion.span whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                      {getInitials(user)}
+                    </motion.span>
+                  )}
                 </button>
                 {dropdownOpen && (
                   <div className="absolute right-0 mt-1 py-1 w-48 rounded-lg bg-background-elevated border border-border shadow-lg z-50">
                     <div className="px-3 py-2 border-b border-border">
-                      <p className="text-xs text-text-muted truncate">{user.email}</p>
+                      <p className="text-xs text-text-muted truncate">
+                        {profile?.username || user.email}
+                      </p>
                     </div>
                     <Link
                       to="/profile"
@@ -192,9 +205,13 @@ export default function Navbar() {
             {user && (
               <Link
                 to="/profile"
-                className="flex items-center justify-center w-9 h-9 rounded-full bg-accent-blue text-text-primary font-medium text-sm"
+                className="flex items-center justify-center w-9 h-9 rounded-full overflow-hidden shrink-0 bg-accent-blue text-text-primary font-medium text-sm"
               >
-                {getInitials(user)}
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  getInitials(user)
+                )}
               </Link>
             )}
             <button
@@ -225,9 +242,6 @@ export default function Navbar() {
             aria-label="Navigation menu"
           >
             <div className="pt-20 px-4 py-4 flex flex-col gap-1">
-              <Link to="/" className={`py-3 px-2 rounded-lg ${linkClass('/')}`}>
-                Home
-              </Link>
               {navLinks.map(({ to, label }) => (
                 <Link key={to} to={to} className={`py-3 px-2 rounded-lg ${linkClass(to)}`}>
                   {label}

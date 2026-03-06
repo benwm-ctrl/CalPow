@@ -179,6 +179,7 @@ export default function BeforeYouGoPage() {
   const [checked, setChecked] = useState(() => loadCheckedSet())
   const [forecasts, setForecasts] = useState({})
   const [loadingForecasts, setLoadingForecasts] = useState(true)
+  const [expanded, setExpanded] = useState({})
 
   useEffect(() => {
     async function loadForecasts() {
@@ -411,11 +412,32 @@ export default function BeforeYouGoPage() {
                           </p>
                         )}
                         {forecast.travel_advice && (
-                          <p className="text-sm text-text-secondary mb-4 line-clamp-2">
-                            {forecast.travel_advice.length > 120
-                              ? `${forecast.travel_advice.slice(0, 120).trim()}…`
-                              : forecast.travel_advice}
-                          </p>
+                          forecast.travel_advice.length <= 120 ? (
+                            <p className="text-sm text-text-secondary mb-4">
+                              {forecast.travel_advice}
+                            </p>
+                          ) : (
+                            <div
+                              className="overflow-hidden mb-4 transition-[max-height] duration-300 ease-in-out"
+                              style={{
+                                maxHeight: expanded[config.key] ? 800 : 84,
+                              }}
+                            >
+                              <p className="text-sm text-text-secondary">
+                                {expanded[config.key]
+                                  ? forecast.travel_advice
+                                  : `${forecast.travel_advice.slice(0, 120).trim()} ... `}
+                                <button
+                                  type="button"
+                                  onClick={() => setExpanded((prev) => ({ ...prev, [config.key]: !prev[config.key] }))}
+                                  className="ml-1 text-sm cursor-pointer border-0 bg-transparent p-0 hover:opacity-80"
+                                  style={{ color: '#3B8BEB', textDecoration: 'none' }}
+                                >
+                                  {expanded[config.key] ? 'Read less' : 'Read more'}
+                                </button>
+                              </p>
+                            </div>
+                          )
                         )}
                         <a
                           href={forecast.forecast_url || fallbackUrl}

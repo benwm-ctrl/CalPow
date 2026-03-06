@@ -381,7 +381,13 @@ export default function MapPage() {
         <>
           <div
             className="absolute top-4 z-10"
-            style={{ right: '220px', width: '280px' }}
+            style={{
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: '280px',
+              backdropFilter: 'blur(8px)',
+              background: 'transparent',
+            }}
           >
             {mapRef.current && (
               <SearchBox
@@ -399,12 +405,12 @@ export default function MapPage() {
                 }}
                 theme={{
                   variables: {
-                    colorBackground: '#1E2D3D',
-                    colorBackgroundHover: '#243447',
+                    colorBackground: 'rgba(30, 45, 61, 0.55)',
+                    colorBackgroundHover: 'rgba(36, 52, 71, 0.65)',
                     colorText: '#F7FAFC',
                     colorTextSecondary: '#A0AEC0',
                     borderRadius: '8px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
                   },
                 }}
               />
