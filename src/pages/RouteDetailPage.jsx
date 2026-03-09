@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { useAuthStore } from '../store/authStore'
+import { useRouteStore } from '../store/routeStore'
 import { ArrowLeft, Pencil, Trash2, Download, Camera } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 
@@ -30,6 +31,13 @@ const RISK_COLORS = {
   considerable: 'bg-warning text-white',
   high: 'bg-danger text-white',
   extreme: 'bg-red-800 text-white',
+}
+const RISK_DESCRIPTIONS = {
+  low: 'Mellow terrain with minimal avalanche exposure. Good for beginners and low-consequence days.',
+  moderate: 'Sustained avalanche terrain with multiple decision points. Requires AIARE 1 and forecast awareness.',
+  considerable: 'Consequential terrain with significant exposure. For experienced parties with strong rescue skills.',
+  high: 'Consequential terrain with significant exposure. For experienced parties with strong rescue skills.',
+  extreme: 'Extreme terrain. High consequence, requires AIARE 2 or guide-level decision making.',
 }
 const DIFFICULTY_COLORS = {
   beginner: 'bg-accent-blue text-white',
@@ -92,6 +100,7 @@ export default function RouteDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [images, setImages] = useState([])
   const [uploading, setUploading] = useState(false)
+  const [expandedRisk, setExpandedRisk] = useState(false)
   const token = import.meta.env.VITE_MAPBOX_TOKEN
 
   useEffect(() => {
@@ -148,6 +157,29 @@ export default function RouteDetailPage() {
     a.download = `calpow-${route?.name?.replace(/\W+/g, '-') || 'route'}-${new Date().toISOString().slice(0, 10)}.gpx`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleOpenOnMap = () => {
+    if (!route?.gpx_data) return
+    let wps = route.gpx_data
+    if (typeof wps === 'string') {
+      try {
+        wps = JSON.parse(wps)
+      } catch {
+        return
+      }
+    }
+    if (!Array.isArray(wps) || wps.length < 2) return
+    useRouteStore.getState().setWaypoints(wps)
+    const lngs = wps.map((wp) => wp[0])
+    const lats = wps.map((wp) => wp[1])
+    useRouteStore.getState().setPendingBounds({
+      minLng: Math.min(...lngs),
+      maxLng: Math.max(...lngs),
+      minLat: Math.min(...lats),
+      maxLat: Math.max(...lats),
+    })
+    navigate('/map')
   }
 
   const handlePhotoSelect = async (e) => {
@@ -298,15 +330,30 @@ export default function RouteDetailPage() {
                 </span>
               )}
               {route.avalanche_risk && (
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    RISK_COLORS[route.avalanche_risk]
-                  }`}
-                >
-                  {RISK_LABELS[route.avalanche_risk]}
+                <span className="inline-flex items-center gap-1">
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      RISK_COLORS[route.avalanche_risk]
+                    }`}
+                  >
+                    {RISK_LABELS[route.avalanche_risk]}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedRisk(!expandedRisk)}
+                    className="text-text-secondary hover:text-text-primary text-xs w-4 h-4 rounded-full border border-current flex items-center justify-center"
+                    aria-label="Risk description"
+                  >
+                    ⓘ
+                  </button>
                 </span>
               )}
             </div>
+            {expandedRisk && route.avalanche_risk && (
+              <div className="text-xs text-text-secondary mt-1">
+                {RISK_DESCRIPTIONS[route.avalanche_risk] ?? RISK_DESCRIPTIONS.moderate}
+              </div>
+            )}
           </div>
         ) : (
           <div className="mb-6 rounded-lg bg-background-secondary border border-border p-4 space-y-3">
@@ -407,7 +454,20 @@ export default function RouteDetailPage() {
         )}
 
         {mapUrl && (
-          <div className="mb-6 rounded-lg overflow-hidden border border-border">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={handleOpenOnMap}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleOpenOnMap()
+              }
+            }}
+            style={{ cursor: waypoints && waypoints.length >= 2 ? 'pointer' : 'default' }}
+            title={waypoints && waypoints.length >= 2 ? 'Click to view on map' : ''}
+            className="mb-6 rounded-lg overflow-hidden border border-border"
+          >
             <img
               src={mapUrl}
               alt="Route map"

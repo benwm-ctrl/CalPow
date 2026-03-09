@@ -1,0 +1,33 @@
+{
+  "region": "lake_tahoe",
+  "name": "Lake Tahoe",
+  "bbox": [
+    -120.35,
+    38.85,
+    -119.85,
+    39.35
+  ],
+  "shape": [
+    2048,
+    2048
+  ],
+  "elevation": {
+    "min": 690.0294799804688,
+    "max": 3199.90087890625,
+    "mean": 1490.9969525134366
+  },
+  "slope": {
+    "mean": 12.015103340148926,
+    "pct_above_25": 2.7392148971557617,
+    "pct_above_30": 0.44128894805908203,
+    "pct_above_35": 0.042366981506347656,
+    "pct_above_45": 0.0
+  },
+  "layers": {
+    "dem": "dem_lake_tahoe.tif",
+    "slope": "slope_lake_tahoe.tif",
+    "aspect": "aspect_lake_tahoe.tif",
+    "tri": "tri_lake_tahoe.tif",
+    "composite": "composite_lake_tahoe.tif"
+  }
+}

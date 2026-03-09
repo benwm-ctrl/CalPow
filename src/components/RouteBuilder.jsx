@@ -7,7 +7,12 @@ import SaveRouteModal from './SaveRouteModal'
 function buildGpxXml(waypoints) {
   const date = new Date().toISOString().slice(0, 10)
   const trkpts = waypoints
-    .map(([lon, lat, ele]) => `    <trkpt lat="${lat}" lon="${lon}"><ele>${ele ?? 0}</ele></trkpt>`)
+    .map((wp) => {
+      const lon = wp[0]
+      const lat = wp[1]
+      const ele = wp[2] ?? 0
+      return `    <trkpt lat="${lat}" lon="${lon}"><ele>${ele}</ele></trkpt>`
+    })
     .join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="CalPow" xmlns="http://www.topografix.com/GPX/1/1">
@@ -32,41 +37,68 @@ function downloadGpx(waypoints) {
   URL.revokeObjectURL(url)
 }
 
-export default function RouteBuilder({ mapRef }) {
+export default function RouteBuilder({ mapRef, mapReady }) {
   const fileInputRef = useRef(null)
   const buildingModeRef = useRef(false)
+  const routeModeRef = useRef('skin')
   const [saveModalOpen, setSaveModalOpen] = useState(false)
-  const {
-    waypoints,
-    buildingMode,
-    addWaypoint,
-    undoWaypoint,
-    clearRoute,
-    setWaypoints,
-    setBuildingMode,
-  } = useRouteStore()
+  const waypoints = useRouteStore((s) => s.waypoints)
+  const buildingMode = useRouteStore((s) => s.buildingMode)
+  const routeMode = useRouteStore((s) => s.routeMode)
+  const setRouteMode = useRouteStore((s) => s.setRouteMode)
+  const removeLastWaypoint = useRouteStore((s) => s.removeLastWaypoint)
+  const clearWaypoints = useRouteStore((s) => s.clearWaypoints)
+  const setWaypoints = useRouteStore((s) => s.setWaypoints)
+  const setBuildingMode = useRouteStore((s) => s.setBuildingMode)
 
   buildingModeRef.current = buildingMode
+  routeModeRef.current = routeMode
+  useEffect(() => {
+    buildingModeRef.current = buildingMode
+  }, [buildingMode])
 
   useEffect(() => {
-    const map = mapRef?.current
-    if (!map) return
+    if (!mapReady) return
 
-    const handleClick = (e) => {
-      console.log('click fired, buildingMode:', buildingModeRef.current, 'lngLat:', e.lngLat)
-      if (!buildingModeRef.current) return
-      const { lng, lat } = e.lngLat
-      let elevation = 0
-      try {
-        const elev = map.queryTerrainElevation([lng, lat], { exaggerated: false })
-        if (typeof elev === 'number' && !Number.isNaN(elev)) elevation = elev
-      } catch (_) {}
-      addWaypoint([lng, lat, elevation])
+    // Poll for map being available (handles hot reload)
+    let map = mapRef?.current
+    const cleanupRef = { current: null }
+
+    if (!map) {
+      const interval = setInterval(() => {
+        map = mapRef?.current
+        if (map) {
+          clearInterval(interval)
+          cleanupRef.current = registerClick(map)
+        }
+      }, 100)
+      return () => {
+        clearInterval(interval)
+        cleanupRef.current?.()
+      }
     }
 
-    map.on('click', handleClick)
-    return () => { map.off('click', handleClick) }
-  }, [mapRef, addWaypoint])
+    cleanupRef.current = registerClick(map)
+    return () => cleanupRef.current?.()
+
+    function registerClick(map) {
+      const handler = (e) => {
+        if (!buildingModeRef.current) return
+        const { lng, lat } = e.lngLat
+        let elevation = 0
+        try {
+          const elev = map.queryTerrainElevation([lng, lat], { exaggerated: false })
+          if (typeof elev === 'number' && !Number.isNaN(elev)) elevation = Math.round(elev)
+        } catch (_) {}
+        const mode = routeModeRef.current
+        const { addWaypoint } = useRouteStore.getState()
+        console.log('✅ waypoint added:', mode, lng.toFixed(4), lat.toFixed(4))
+        addWaypoint([lng, lat, elevation, mode])
+      }
+      map.on('click', handler)
+      return () => map.off('click', handler)
+    }
+  }, [mapReady, mapRef])
 
   const handleUploadGpx = (e) => {
     const file = e.target.files?.[0]
@@ -86,7 +118,7 @@ export default function RouteBuilder({ mapRef }) {
           alert('No track points in GPX file.')
           return
         }
-        const wps = points.map((p) => [p.lon, p.lat, p.ele ?? 0])
+        const wps = points.map((p) => [p.lon, p.lat, p.ele ?? 0, 'skin'])
         setWaypoints(wps)
         const lngs = wps.map((w) => w[0])
         const lats = wps.map((w) => w[1])
@@ -117,7 +149,14 @@ export default function RouteBuilder({ mapRef }) {
     <>
       <div
         className="absolute left-4 z-10 flex flex-col gap-2 transition-[bottom] duration-200 max-w-[calc(100vw-2rem)]"
-        style={{ bottom: waypoints.length >= 2 ? 170 : 16 }}
+        style={{
+          bottom: waypoints.length >= 2 ? 170 : 16,
+          background: 'rgba(30, 45, 61, 0.55)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '8px',
+          padding: '8px',
+        }}
       >
       {/* Build Route / Stop Building */}
       <button
@@ -130,12 +169,59 @@ export default function RouteBuilder({ mapRef }) {
         {buildingMode ? 'Stop Building' : 'Build Route'}
       </button>
 
+      {buildingMode && (
+        <div
+          style={{
+            display: 'flex',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            border: '1px solid #2D3748',
+            marginTop: '8px',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setRouteMode('skin')}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              fontSize: '13px',
+              fontWeight: 500,
+              backgroundColor: routeMode === 'skin' ? '#3B8BEB' : '#1E2D3D',
+              color: routeMode === 'skin' ? '#fff' : '#718096',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            🎿 Skintrack
+          </button>
+          <button
+            type="button"
+            onClick={() => setRouteMode('descent')}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              fontSize: '13px',
+              fontWeight: 500,
+              backgroundColor: routeMode === 'descent' ? '#7C3AED' : '#1E2D3D',
+              color: routeMode === 'descent' ? '#fff' : '#718096',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            🔴 Descent
+          </button>
+        </div>
+      )}
+
       {/* Undo / Clear — only when building or when there are points */}
       {(buildingMode || waypoints.length > 0) && (
         <div className="flex flex-col sm:flex-row gap-2">
           <button
             type="button"
-            onClick={undoWaypoint}
+            onClick={removeLastWaypoint}
             disabled={waypoints.length === 0}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-text-primary bg-background-secondary border border-border hover:bg-background-elevated disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -144,7 +230,7 @@ export default function RouteBuilder({ mapRef }) {
           </button>
           <button
             type="button"
-            onClick={clearRoute}
+            onClick={clearWaypoints}
             disabled={waypoints.length === 0}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-text-primary bg-background-secondary border border-border hover:bg-background-elevated disabled:opacity-50 disabled:cursor-not-allowed"
           >

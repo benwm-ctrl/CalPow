@@ -1,0 +1,31 @@
+{
+  "region": "tahoe",
+  "name": "Lake Tahoe / Sierra",
+  "bbox": [
+    -120.35,
+    38.85,
+    -119.85,
+    39.35
+  ],
+  "shape": [
+    2048,
+    2048
+  ],
+  "elevation": {
+    "min": 1875.65234375,
+    "max": 3429.278076171875,
+    "mean": 2424.440980042389
+  },
+  "slope": {
+    "mean": 9.51472282409668,
+    "pct_above_30": 0.022935867309570312,
+    "pct_above_35": 0.0003337860107421875,
+    "pct_above_45": 0.0
+  },
+  "layers": {
+    "slope": "slope_tahoe.tif",
+    "aspect": "aspect_tahoe.tif",
+    "tri": "tri_tahoe.tif",
+    "composite": "composite_tahoe.tif"
+  }
+}

@@ -100,13 +100,18 @@ export default function SaveRouteModal({ isOpen, onClose, onSuccess }) {
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style={{ backgroundColor: 'rgba(15, 25, 35, 0.9)' }}
+        className="flex items-center justify-center p-4"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 200,
+          backgroundColor: 'rgba(15, 25, 35, 0.9)',
+        }}
         onClick={onClose}
       >
         <div
           className="w-full max-w-lg rounded-xl shadow-xl"
-          style={{ backgroundColor: '#1E2D3D' }}
+          style={{ position: 'relative', backgroundColor: '#1E2D3D', zIndex: 201 }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="p-6">
@@ -259,8 +264,8 @@ export default function SaveRouteModal({ isOpen, onClose, onSuccess }) {
 
       {toast && (
         <div
-          className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg px-4 py-2 font-medium text-white shadow-lg"
-          style={{ backgroundColor: '#38A169' }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-lg px-4 py-2 font-medium text-white shadow-lg"
+          style={{ backgroundColor: '#38A169', zIndex: 102 }}
         >
           Route saved!
         </div>

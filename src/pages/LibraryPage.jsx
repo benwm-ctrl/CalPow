@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { supabase } from '../services/supabase'
 import { useAuthStore } from '../store/authStore'
+import { useRouteStore } from '../store/routeStore'
 import { Mountain, MapPin } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
 import FadeIn from '../components/FadeIn'
@@ -35,6 +36,13 @@ const RISK_COLORS = {
   high: 'bg-danger text-white',
   extreme: 'bg-red-800 text-white',
 }
+const RISK_DESCRIPTIONS = {
+  low: 'Mellow terrain with minimal avalanche exposure. Good for beginners and low-consequence days.',
+  moderate: 'Sustained avalanche terrain with multiple decision points. Requires AIARE 1 and forecast awareness.',
+  considerable: 'Consequential terrain with significant exposure. For experienced parties with strong rescue skills.',
+  high: 'Consequential terrain with significant exposure. For experienced parties with strong rescue skills.',
+  extreme: 'Extreme terrain. High consequence, requires AIARE 2 or guide-level decision making.',
+}
 const DIFFICULTY_COLORS = {
   beginner: 'bg-accent-blue text-white',
   intermediate: 'bg-yellow-500 text-gray-900',
@@ -44,6 +52,7 @@ const DIFFICULTY_COLORS = {
 
 export default function LibraryPage() {
   const { user } = useAuthStore()
+  const navigate = useNavigate()
   const [routes, setRoutes] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -51,6 +60,7 @@ export default function LibraryPage() {
   const [difficultyFilter, setDifficultyFilter] = useState('all')
   const [riskFilter, setRiskFilter] = useState('all')
   const [sortBy, setSortBy] = useState('newest')
+  const [expandedRiskId, setExpandedRiskId] = useState(null)
 
   useEffect(() => {
     if (!user?.id) return
@@ -255,17 +265,67 @@ export default function LibraryPage() {
                         </span>
                       )}
                       {route.avalanche_risk && (
-                        <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            RISK_COLORS[route.avalanche_risk] ?? 'bg-background-elevated text-text-primary'
-                          }`}
-                        >
-                          {RISK_LABELS[route.avalanche_risk] ?? route.avalanche_risk}
+                        <span className="inline-flex items-center gap-1 flex-wrap">
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              RISK_COLORS[route.avalanche_risk] ?? 'bg-background-elevated text-text-primary'
+                            }`}
+                          >
+                            {RISK_LABELS[route.avalanche_risk] ?? route.avalanche_risk}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setExpandedRiskId((id) => (id === route.id ? null : route.id))
+                            }}
+                            className="text-text-secondary hover:text-text-primary text-xs w-4 h-4 rounded-full border border-current flex items-center justify-center"
+                            aria-label="Risk description"
+                          >
+                            ⓘ
+                          </button>
+                          {expandedRiskId === route.id && (
+                            <span className="text-xs text-text-secondary mt-1 w-full block">
+                              {RISK_DESCRIPTIONS[route.avalanche_risk] ?? RISK_DESCRIPTIONS.moderate}
+                            </span>
+                          )}
                         </span>
                       )}
                     </div>
                     </div>
                   </Link>
+                  {route.gpx_data && (() => {
+                    let wps = route.gpx_data
+                    if (typeof wps === 'string') {
+                      try {
+                        wps = JSON.parse(wps)
+                      } catch {
+                        wps = null
+                      }
+                    }
+                    return Array.isArray(wps) && wps.length >= 2 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          useRouteStore.getState().setWaypoints(wps)
+                          const lngs = wps.map((wp) => wp[0])
+                          const lats = wps.map((wp) => wp[1])
+                          useRouteStore.getState().setPendingBounds({
+                            minLng: Math.min(...lngs),
+                            maxLng: Math.max(...lngs),
+                            minLat: Math.min(...lats),
+                            maxLat: Math.max(...lats),
+                          })
+                          navigate('/map')
+                        }}
+                        className="mt-2 text-xs font-medium text-accent-blue hover:text-accent-light"
+                      >
+                        View on map
+                      </button>
+                    ) : null
+                  })()}
                 </motion.div>
               </FadeIn>
               ))}

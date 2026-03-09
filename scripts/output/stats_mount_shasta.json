@@ -1,0 +1,33 @@
+{
+  "region": "mount_shasta",
+  "name": "Mount Shasta",
+  "bbox": [
+    -122.35,
+    41.25,
+    -121.95,
+    41.55
+  ],
+  "shape": [
+    2048,
+    2048
+  ],
+  "elevation": {
+    "min": 684.2865600585938,
+    "max": 3188.50927734375,
+    "mean": 1491.0023148567998
+  },
+  "slope": {
+    "mean": 16.763017654418945,
+    "pct_above_25": 16.618061065673828,
+    "pct_above_30": 6.355690956115723,
+    "pct_above_35": 1.7217636108398438,
+    "pct_above_45": 0.025773048400878906
+  },
+  "layers": {
+    "dem": "dem_mount_shasta.tif",
+    "slope": "slope_mount_shasta.tif",
+    "aspect": "aspect_mount_shasta.tif",
+    "tri": "tri_mount_shasta.tif",
+    "composite": "composite_mount_shasta.tif"
+  }
+}

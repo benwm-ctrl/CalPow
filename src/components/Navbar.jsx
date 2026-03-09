@@ -118,32 +118,49 @@ export default function Navbar() {
       }}
     >
     <nav
-      className="sticky top-0 z-40 transition-[border-color] duration-200"
+      className="sticky top-0 z-40 transition-[border-color] duration-200 h-16"
       style={{
+        display: 'flex',
+        alignItems: 'center',
+        width: '100%',
+        padding: '0 16px',
         backdropFilter: 'blur(12px)',
         backgroundColor: 'rgba(15, 25, 35, 0.85)',
         borderBottom: scrolled ? '1px solid #2D3748' : '1px solid transparent',
       }}
     >
-      <div className="max-w-6xl mx-auto pl-0 pr-0">
-        <div className="flex items-center justify-between h-16 gap-4">
+      <div className="max-w-6xl mx-auto w-full flex items-center">
+        {/* Logo — far left */}
+        <div style={{ flexShrink: 0 }}>
           <Link
             to="/"
-            className="text-xl font-bold text-text-primary hover:text-accent-blue transition-colors shrink-0 ml-0 pl-4"
+            className="text-xl font-bold text-text-primary hover:text-accent-blue transition-colors pl-0 ml-0"
           >
             CalPow
           </Link>
+        </div>
 
-          {/* Desktop nav */}
-          <div className="hidden md:flex items-center justify-between flex-1 gap-4">
-            {navLinks.map(({ to, label }) => (
-              <Link key={to} to={to} className={linkClass(to)}>
-                {label}
-              </Link>
-            ))}
+        {/* Nav links — centered */}
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '32px',
+          }}
+          className="hidden md:flex"
+        >
+          {navLinks.map(({ to, label }) => (
+            <Link key={to} to={to} className={linkClass(to)}>
+              {label}
+            </Link>
+          ))}
+        </div>
 
-            {user ? (
-              <div className="relative mr-0 pr-4" ref={dropdownRef}>
+        {/* Avatar — far right */}
+        <div style={{ flexShrink: 0 }}>
+          {user ? (
+            <div className="relative mr-0 pr-0" ref={dropdownRef}>
                 <button
                   type="button"
                   onClick={() => setDropdownOpen((o) => !o)}
@@ -198,10 +215,10 @@ export default function Navbar() {
                 Sign In
               </Link>
             )}
-          </div>
+        </div>
 
-          {/* Mobile: hamburger + avatar */}
-          <div className="flex md:hidden items-center gap-2 mr-0 pr-4">
+        {/* Mobile: hamburger + avatar */}
+        <div className="flex md:hidden items-center gap-2" style={{ flexShrink: 0 }}>
             {user && (
               <Link
                 to="/profile"
@@ -227,8 +244,6 @@ export default function Navbar() {
             </button>
           </div>
         </div>
-      </div>
-
       {/* Mobile drawer: slide from right */}
       <AnimatePresence>
         {mobileOpen && (

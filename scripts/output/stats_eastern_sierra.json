@@ -1,0 +1,33 @@
+{
+  "region": "eastern_sierra",
+  "name": "Eastern Sierra",
+  "bbox": [
+    -119.05,
+    37.45,
+    -118.65,
+    37.85
+  ],
+  "shape": [
+    2048,
+    2048
+  ],
+  "elevation": {
+    "min": 690.2593994140625,
+    "max": 3194.095458984375,
+    "mean": 1490.9758005908952
+  },
+  "slope": {
+    "mean": 14.806775093078613,
+    "pct_above_25": 9.735417366027832,
+    "pct_above_30": 2.9436588287353516,
+    "pct_above_35": 0.6068229675292969,
+    "pct_above_45": 0.004935264587402344
+  },
+  "layers": {
+    "dem": "dem_eastern_sierra.tif",
+    "slope": "slope_eastern_sierra.tif",
+    "aspect": "aspect_eastern_sierra.tif",
+    "tri": "tri_eastern_sierra.tif",
+    "composite": "composite_eastern_sierra.tif"
+  }
+}

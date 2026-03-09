@@ -47,6 +47,7 @@ async function getCachedForecast(region) {
       .maybeSingle()
     if (error || !data) return null
     const level = data.danger_level
+    const fallback = level ?? 1
     return {
       region: data.region,
       center: CENTER_IDS[region],
@@ -56,6 +57,9 @@ async function getCachedForecast(region) {
       travel_advice: data.travel_advice ?? null,
       forecast_url: data.forecast_url ?? FALLBACK_URLS[region] ?? null,
       zones: Array.isArray(data.zones) ? data.zones : [],
+      danger_below_treeline: data.danger_below_treeline ?? fallback,
+      danger_near_treeline: data.danger_near_treeline ?? fallback,
+      danger_above_treeline: data.danger_above_treeline ?? fallback,
     }
   } catch {
     return null
@@ -119,6 +123,26 @@ export async function fetchForecast(region) {
         features.find((f) => f.properties?.danger_level > 0) ?? features[0]
       const props = primaryFeature?.properties ?? {}
 
+      // Parse elevation-band danger if present (e.g. dangerRatings or per-zone elevation)
+      let dangerBelow = maxDanger > 0 ? maxDanger : null
+      let dangerNear = dangerBelow
+      let dangerAbove = dangerBelow
+      const dangerRatings = data?.dangerRatings ?? data?.danger_ratings ?? props?.danger_ratings
+      if (Array.isArray(dangerRatings) && dangerRatings.length > 0) {
+        for (const dr of dangerRatings) {
+          const band = (dr.elevation_band ?? dr.band ?? '').toLowerCase()
+          const level = dr.danger_level ?? dr.lower ?? dr.upper ?? dr.rating
+          if (level == null || level < 0) continue
+          if (band === 'btl' || band === 'below_treeline' || band === 'below treeline') {
+            dangerBelow = level
+          } else if (band === 'tln' || band === 'near_treeline' || band === 'treeline') {
+            dangerNear = level
+          } else if (band === 'alp' || band === 'above_treeline' || band === 'alpine') {
+            dangerAbove = level
+          }
+        }
+      }
+
       const forecast = {
         region,
         center: props.center ?? centerId,
@@ -128,6 +152,9 @@ export async function fetchForecast(region) {
         color: maxDanger > 0 ? DANGER_COLORS[maxDanger] : '#4A5568',
         travel_advice: props.travel_advice ?? null,
         forecast_url: props.link ?? FALLBACK_URLS[region] ?? null,
+        danger_below_treeline: dangerBelow ?? maxDanger ?? 1,
+        danger_near_treeline: dangerNear ?? maxDanger ?? 1,
+        danger_above_treeline: dangerAbove ?? maxDanger ?? 1,
         zones: features.map((f) => ({
           name: f.properties?.name,
           danger_level: f.properties?.danger_level,

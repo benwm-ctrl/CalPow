@@ -1,0 +1,33 @@
+{
+  "region": "bridgeport",
+  "name": "Bridgeport",
+  "bbox": [
+    -119.45,
+    38.15,
+    -119.1,
+    38.45
+  ],
+  "shape": [
+    2048,
+    2048
+  ],
+  "elevation": {
+    "min": 687.1837768554688,
+    "max": 3197.6748046875,
+    "mean": 1490.9919320250337
+  },
+  "slope": {
+    "mean": 17.799285888671875,
+    "pct_above_25": 20.794391632080078,
+    "pct_above_30": 8.980345726013184,
+    "pct_above_35": 2.8832435607910156,
+    "pct_above_45": 0.07386207580566406
+  },
+  "layers": {
+    "dem": "dem_bridgeport.tif",
+    "slope": "slope_bridgeport.tif",
+    "aspect": "aspect_bridgeport.tif",
+    "tri": "tri_bridgeport.tif",
+    "composite": "composite_bridgeport.tif"
+  }
+}

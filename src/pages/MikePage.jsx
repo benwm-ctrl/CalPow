@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { sendMessageToMike } from '../services/groq'
-import { Mountain, Send } from 'lucide-react'
+import { Send } from 'lucide-react'
+import mikeImg from '../assets/images/Salm_Miles-Clark-1.jpg'
 
 const TOPIC_CHIPS = [
   'Avalanche Safety',
@@ -67,7 +68,7 @@ export default function MikePage() {
         {
           role: 'assistant',
           content:
-            "Stoked to help but having trouble connecting right now. Check your connection and try again!",
+            "Having trouble connecting. Check your connection and try again.",
           timestamp: new Date(),
         },
       ])
@@ -96,14 +97,14 @@ export default function MikePage() {
           style={{ backgroundColor: '#1E2D3D' }}
         >
           <div
-            className="w-20 h-20 rounded-full mx-auto flex items-center justify-center mb-4"
-            style={{ backgroundColor: '#3B8BEB' }}
+            className="w-20 h-20 rounded-full mx-auto flex items-center justify-center overflow-hidden mb-4"
+            style={{ backgroundColor: '#1E2D3D' }}
           >
-            <Mountain className="w-10 h-10 text-white" />
+            <img src={mikeImg} alt="Mike" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-2xl font-bold text-white text-center">Mike</h1>
           <p className="text-center text-text-secondary text-sm mt-1">
-            California Backcountry Guide
+            Backcountry Guide · Sierra Nevada
           </p>
           <div className="flex flex-wrap justify-center gap-2 mt-3">
             <span className="px-2 py-1 rounded-full text-xs font-medium text-text-secondary bg-background-elevated">
@@ -111,9 +112,8 @@ export default function MikePage() {
             </span>
           </div>
           <p className="text-text-primary text-sm mt-4 leading-relaxed">
-            I've skied the Sierra my whole life and guided on Shasta, the
-            Eastern Sierra, and the Bridgeport area. I'm here to help you make
-            smart decisions in the backcountry. Ask me anything.
+            I've skied the Sierra for 20 years and guided in the Cascades and Eastern Sierra.
+            I'm here to give you direct, safety-focused advice. Ask me anything.
           </p>
           <p
             className="mt-3 italic"
@@ -147,16 +147,13 @@ export default function MikePage() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile header */}
         <header className="md:hidden flex items-center gap-2 px-4 py-3 border-b border-border">
-          <div
-            className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-            style={{ backgroundColor: '#3B8BEB' }}
-          >
-            <Mountain className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-full overflow-hidden shrink-0">
+            <img src={mikeImg} alt="Mike" className="w-full h-full object-cover" />
           </div>
           <div>
             <span className="font-semibold text-white">Mike</span>
             <span className="text-text-secondary text-sm block">
-              California Backcountry Guide
+              Backcountry Guide · Sierra Nevada
             </span>
           </div>
         </header>
@@ -191,9 +188,6 @@ export default function MikePage() {
             >
               {msg.role === 'assistant' && (
                 <span className="text-sm text-text-secondary mb-1 flex items-center gap-1">
-                  <span role="img" aria-hidden>
-                    🎿
-                  </span>
                   Mike
                 </span>
               )}
@@ -224,7 +218,6 @@ export default function MikePage() {
               className="flex flex-col items-start"
             >
               <span className="text-sm text-text-secondary mb-1 flex items-center gap-1">
-                <span role="img" aria-hidden>🎿</span>
                 Mike
               </span>
               <div
