@@ -64,6 +64,15 @@ def download_dem(west, south, east, north, name, resolution=10):
     safe_name = name.lower().replace(' ', '_')
     output_path = os.path.join(OUTPUT_DIR, f'dem_{safe_name}.tif')
 
+    # Special case: use pre-merged California DEM
+    california_dem = os.path.join(OUTPUT_DIR, 'dem_california.tif')
+    if safe_name == 'california' and os.path.exists(california_dem):
+        print(f"  Using pre-merged California DEM ({os.path.getsize(california_dem)//1024//1024}MB)")
+        import shutil
+        if os.path.abspath(california_dem) != os.path.abspath(output_path):
+            shutil.copy(california_dem, output_path)
+        return output_path, None, None
+
     if os.path.exists(output_path):
         size_mb = os.path.getsize(output_path) // 1024 // 1024
         print(f"  Using existing DEM: {output_path} ({size_mb}MB)")
@@ -306,6 +315,74 @@ def export_rgb_colorized(data, colormap, transform, crs, output_path,
     print(f"  Exported RGB: {output_path}")
 
 
+def export_rgba_slope(slope_data, colormap, transform, crs, output_path):
+    """
+    4-band RGBA GeoTIFF for slope.
+    Pixels below 27° are fully transparent (alpha=0).
+    Pixels 27-30° fade in from 0-255 alpha.
+    Pixels above 30° are fully opaque (alpha=255).
+    """
+    data_min, data_max = 0, 60
+    norm = np.clip(
+        (slope_data - data_min) / (data_max - data_min + 1e-6),
+        0, 1)
+
+    r_out = np.zeros_like(norm, dtype=np.uint8)
+    g_out = np.zeros_like(norm, dtype=np.uint8)
+    b_out = np.zeros_like(norm, dtype=np.uint8)
+    a_out = np.zeros_like(norm, dtype=np.uint8)
+
+    cm = sorted(colormap, key=lambda x: x[0])
+
+    for i in range(len(cm) - 1):
+        v0, r0, g0, b0 = cm[i]
+        v1, r1, g1, b1 = cm[i + 1]
+        n0 = v0 / 60.0
+        n1 = v1 / 60.0
+        mask = (norm >= n0) & (norm < n1)
+        t = np.where(mask, (norm - n0) / (n1 - n0 + 1e-6), 0)
+        r_out = np.where(mask,
+                         np.clip(r0 + t * (r1 - r0), 0, 255).astype(np.uint8), r_out)
+        g_out = np.where(mask,
+                         np.clip(g0 + t * (g1 - g0), 0, 255).astype(np.uint8), g_out)
+        b_out = np.where(mask,
+                         np.clip(b0 + t * (b1 - b0), 0, 255).astype(np.uint8), b_out)
+
+    v_last, r_last, g_last, b_last = cm[-1]
+    mask_last = norm >= (v_last / 60.0)
+    r_out = np.where(mask_last, r_last, r_out)
+    g_out = np.where(mask_last, g_last, g_out)
+    b_out = np.where(mask_last, b_last, b_out)
+
+    # Alpha channel:
+    # below 27° = 0 (transparent)
+    # 27-30° = fade in 0-255
+    # above 30° = 255 (opaque)
+    a_out = np.where(slope_data < 27, 0, a_out)
+    a_out = np.where(
+        (slope_data >= 27) & (slope_data < 30),
+        ((slope_data - 27) / 3 * 255).astype(np.uint8),
+        a_out)
+    a_out = np.where(slope_data >= 30, 255, a_out)
+    a_out = a_out.astype(np.uint8)
+
+    with rasterio.open(
+        output_path, 'w', driver='GTiff',
+        height=slope_data.shape[0],
+        width=slope_data.shape[1],
+        count=4,
+        dtype=np.uint8,
+        crs=crs,
+        transform=transform,
+        compress='lzw',
+    ) as dst:
+        dst.write(r_out, 1)
+        dst.write(g_out, 2)
+        dst.write(b_out, 3)
+        dst.write(a_out, 4)
+    print(f"  Exported RGBA slope: {output_path}")
+
+
 def process(west, south, east, north, name,
             dangerous_aspects=None, danger_level=2):
     safe_name = name.lower().replace(' ', '_')
@@ -369,9 +446,8 @@ def process(west, south, east, north, name,
 
     # Export RGB colorized for Mapbox (no client-side color expression)
     print("Exporting RGB colorized GeoTIFFs for Mapbox...")
-    export_rgb_colorized(slope, SLOPE_COLORMAP, transform, crs,
-        os.path.join(OUTPUT_DIR, f'slope_{safe_name}_rgb.tif'),
-        data_min=0, data_max=60)
+    export_rgba_slope(slope, SLOPE_COLORMAP, transform, crs,
+        os.path.join(OUTPUT_DIR, f'slope_{safe_name}_rgb.tif'))
     export_rgb_colorized(aspect, ASPECT_COLORMAP, transform, crs,
         os.path.join(OUTPUT_DIR, f'aspect_{safe_name}_rgb.tif'),
         data_min=0, data_max=360)
@@ -436,7 +512,7 @@ if __name__ == '__main__':
     parser.add_argument('--danger', type=int, default=2,
         help='Danger level 1-5')
     parser.add_argument('--preset', type=str,
-        choices=['shasta','tahoe','bridgeport','eastern_sierra'],
+        choices=['shasta','tahoe','bridgeport','eastern_sierra','california'],
         help='Use a preset region')
     args = parser.parse_args()
 
@@ -445,6 +521,7 @@ if __name__ == '__main__':
         'tahoe':          (-120.35, 38.85, -119.85, 39.35, 'Lake Tahoe'),
         'bridgeport':     (-119.45, 38.15, -119.10, 38.45, 'Bridgeport'),
         'eastern_sierra': (-119.05, 37.45, -118.65, 37.85, 'Eastern Sierra'),
+        'california':     (-122.35, 36.42, -118.09, 41.50, 'California'),
     }
 
     if args.preset:

@@ -31,10 +31,7 @@ LAYERS = [
     ('tri',       'CalPow Terrain Ruggedness'),
     ('composite', 'CalPow Composite Risk'),
 ]
-REGIONS = [
-    'mount_shasta', 'lake_tahoe',
-    'bridgeport', 'eastern_sierra',
-]
+REGIONS = ['california']
 
 def get_credentials():
     r = requests.post(

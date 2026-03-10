@@ -1,0 +1,33 @@
+{
+  "region": "california",
+  "name": "California",
+  "bbox": [
+    -122.35,
+    36.42,
+    -118.09,
+    41.5
+  ],
+  "shape": [
+    18251,
+    15199
+  ],
+  "elevation": {
+    "min": 0.0,
+    "max": 4410.80419921875,
+    "mean": 464.620699560316
+  },
+  "slope": {
+    "mean": 3.553489923477173,
+    "pct_above_25": 4.513328299079454,
+    "pct_above_30": 2.641416939304549,
+    "pct_above_35": 1.308291245842073,
+    "pct_above_45": 0.245298660440566
+  },
+  "layers": {
+    "dem": "dem_california.tif",
+    "slope": "slope_california.tif",
+    "aspect": "aspect_california.tif",
+    "tri": "tri_california.tif",
+    "composite": "composite_california.tif"
+  }
+}

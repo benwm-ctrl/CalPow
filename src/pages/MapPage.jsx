@@ -22,30 +22,10 @@ const REGIONS = {
 }
 
 const TERRAIN_TILESETS = {
-  slope: {
-    mount_shasta:   'benwm.calpow_slope_mount__r',
-    lake_tahoe:     'benwm.calpow_slope_lake_t_r',
-    bridgeport:     'benwm.calpow_slope_bridge_r',
-    eastern_sierra: 'benwm.calpow_slope_easter_r',
-  },
-  aspect: {
-    mount_shasta:   'benwm.calpow_aspec_mount__r',
-    lake_tahoe:     'benwm.calpow_aspec_lake_t_r',
-    bridgeport:     'benwm.calpow_aspec_bridge_r',
-    eastern_sierra: 'benwm.calpow_aspec_easter_r',
-  },
-  tri: {
-    mount_shasta:   'benwm.calpow_tri_mount__r',
-    lake_tahoe:     'benwm.calpow_tri_lake_t_r',
-    bridgeport:     'benwm.calpow_tri_bridge_r',
-    eastern_sierra: 'benwm.calpow_tri_easter_r',
-  },
-  composite: {
-    mount_shasta:   'benwm.calpow_compo_mount__r',
-    lake_tahoe:     'benwm.calpow_compo_lake_t_r',
-    bridgeport:     'benwm.calpow_compo_bridge_r',
-    eastern_sierra: 'benwm.calpow_compo_easter_r',
-  },
+  slope: 'benwm.calpow_slope_califo_r',
+  aspect: 'benwm.calpow_aspec_califo_r',
+  tri: 'benwm.calpow_tri_califo_r',
+  composite: 'benwm.calpow_compo_califo_r',
 }
 
 // Color ramps for each layer type
@@ -674,49 +654,45 @@ export default function MapPage() {
     if (!map || !mapReady) return
 
     const LAYER_TYPES = ['slope', 'aspect', 'tri', 'composite']
-    const REGION_IDS = ['mount_shasta', 'lake_tahoe', 'bridgeport', 'eastern_sierra']
 
     LAYER_TYPES.forEach((layerType) => {
       const isActive = activeLayers.includes(layerType)
+      const sourceId = `terrain-${layerType}`
+      const layerId = `terrain-layer-${layerType}`
+      const tilesetId = TERRAIN_TILESETS[layerType]
 
-      REGION_IDS.forEach((region) => {
-        const sourceId = `terrain-${layerType}-${region}`
-        const layerId = `terrain-layer-${layerType}-${region}`
-        const tilesetId = TERRAIN_TILESETS[layerType][region]
-
-        if (isActive) {
-          if (!map.getSource(sourceId)) {
-            map.addSource(sourceId, {
-              type: 'raster',
-              tiles: [
-                `https://a.tiles.mapbox.com/v4/${tilesetId}/{z}/{x}/{y}.jpg?access_token=${import.meta.env.VITE_MAPBOX_TOKEN}`,
-                `https://b.tiles.mapbox.com/v4/${tilesetId}/{z}/{x}/{y}.jpg?access_token=${import.meta.env.VITE_MAPBOX_TOKEN}`,
-              ],
-              tileSize: 256,
-              minzoom: 0,
-              maxzoom: 13,
-            })
-          }
-          if (!map.getLayer(layerId)) {
-            map.addLayer(
-              {
-                id: layerId,
-                type: 'raster',
-                source: sourceId,
-                minzoom: 10,
-                maxzoom: 22,
-                paint: {
-                  'raster-opacity': 0.75,
-                },
-              },
-              'route-skin'
-            )
-          }
-        } else {
-          if (map.getLayer(layerId)) map.removeLayer(layerId)
-          if (map.getSource(sourceId)) map.removeSource(sourceId)
+      if (isActive) {
+        if (!map.getSource(sourceId)) {
+          map.addSource(sourceId, {
+            type: 'raster',
+            tiles: [
+              `https://a.tiles.mapbox.com/v4/${tilesetId}/{z}/{x}/{y}.jpg?access_token=${import.meta.env.VITE_MAPBOX_TOKEN}`,
+              `https://b.tiles.mapbox.com/v4/${tilesetId}/{z}/{x}/{y}.jpg?access_token=${import.meta.env.VITE_MAPBOX_TOKEN}`,
+            ],
+            tileSize: 256,
+            minzoom: 0,
+            maxzoom: 13,
+          })
         }
-      })
+        if (!map.getLayer(layerId)) {
+          map.addLayer(
+            {
+              id: layerId,
+              type: 'raster',
+              source: sourceId,
+              minzoom: 10,
+              maxzoom: 22,
+              paint: {
+                'raster-opacity': 0.75,
+              },
+            },
+            'route-skin'
+          )
+        }
+      } else {
+        if (map.getLayer(layerId)) map.removeLayer(layerId)
+        if (map.getSource(sourceId)) map.removeSource(sourceId)
+      }
     })
   }, [activeLayers, mapReady])
 

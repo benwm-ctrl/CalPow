@@ -1,9 +1,4 @@
 {
-  "slope_mount_shasta": {
-    "tileset_id": "benwm.calpow_slope_mount__r",
-    "region": "mount_shasta",
-    "layer": "slope"
-  },
   "aspect_mount_shasta": {
     "tileset_id": "benwm.calpow_aspec_mount__r",
     "region": "mount_shasta",
@@ -18,11 +13,6 @@
     "tileset_id": "benwm.calpow_compo_mount__r",
     "region": "mount_shasta",
     "layer": "composite"
-  },
-  "slope_lake_tahoe": {
-    "tileset_id": "benwm.calpow_slope_lake_t_r",
-    "region": "lake_tahoe",
-    "layer": "slope"
   },
   "aspect_lake_tahoe": {
     "tileset_id": "benwm.calpow_aspec_lake_t_r",
@@ -39,11 +29,6 @@
     "region": "lake_tahoe",
     "layer": "composite"
   },
-  "slope_bridgeport": {
-    "tileset_id": "benwm.calpow_slope_bridge_r",
-    "region": "bridgeport",
-    "layer": "slope"
-  },
   "aspect_bridgeport": {
     "tileset_id": "benwm.calpow_aspec_bridge_r",
     "region": "bridgeport",
@@ -59,11 +44,6 @@
     "region": "bridgeport",
     "layer": "composite"
   },
-  "slope_eastern_sierra": {
-    "tileset_id": "benwm.calpow_slope_easter_r",
-    "region": "eastern_sierra",
-    "layer": "slope"
-  },
   "aspect_eastern_sierra": {
     "tileset_id": "benwm.calpow_aspec_easter_r",
     "region": "eastern_sierra",
@@ -77,6 +57,46 @@
   "composite_eastern_sierra": {
     "tileset_id": "benwm.calpow_compo_easter_r",
     "region": "eastern_sierra",
+    "layer": "composite"
+  },
+  "slope_mount_shasta": {
+    "tileset_id": "benwm.calpow_slope_mount__r",
+    "region": "mount_shasta",
+    "layer": "slope"
+  },
+  "slope_lake_tahoe": {
+    "tileset_id": "benwm.calpow_slope_lake_t_r",
+    "region": "lake_tahoe",
+    "layer": "slope"
+  },
+  "slope_bridgeport": {
+    "tileset_id": "benwm.calpow_slope_bridge_r",
+    "region": "bridgeport",
+    "layer": "slope"
+  },
+  "slope_eastern_sierra": {
+    "tileset_id": "benwm.calpow_slope_easter_r",
+    "region": "eastern_sierra",
+    "layer": "slope"
+  },
+  "slope_california": {
+    "tileset_id": "benwm.calpow_slope_califo_r",
+    "region": "california",
+    "layer": "slope"
+  },
+  "aspect_california": {
+    "tileset_id": "benwm.calpow_aspec_califo_r",
+    "region": "california",
+    "layer": "aspect"
+  },
+  "tri_california": {
+    "tileset_id": "benwm.calpow_tri_califo_r",
+    "region": "california",
+    "layer": "tri"
+  },
+  "composite_california": {
+    "tileset_id": "benwm.calpow_compo_califo_r",
+    "region": "california",
     "layer": "composite"
   }
 }
