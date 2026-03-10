@@ -29,6 +29,17 @@ SLOPE_COLORMAP = [
     (60, 26, 26, 46),    # black   cliff
 ]
 
+ASPECT_DIRECTIONS = {
+    'N':  [(337.5, 360), (0, 22.5)],
+    'NE': [(22.5, 67.5)],
+    'E':  [(67.5, 112.5)],
+    'SE': [(112.5, 157.5)],
+    'S':  [(157.5, 202.5)],
+    'SW': [(202.5, 247.5)],
+    'W':  [(247.5, 292.5)],
+    'NW': [(292.5, 337.5)],
+}
+
 ASPECT_COLORMAP = [
     (0, 41, 128, 185),    # N   blue
     (45, 26, 188, 156),   # NE  teal
@@ -383,6 +394,107 @@ def export_rgba_slope(slope_data, colormap, transform, crs, output_path):
     print(f"  Exported RGBA slope: {output_path}")
 
 
+def export_aspect_mask(aspect, dir_key, ranges, transform, crs, output_path):
+    """
+    Export a binary RGB mask GeoTIFF for one aspect direction.
+    Pixels within any (lo, hi) in ranges are white (255,255,255), else black (0,0,0).
+    ranges: list of (lo, hi) in degrees; lo > hi means wraparound (e.g. N).
+    """
+    mask = np.zeros_like(aspect, dtype=bool)
+    for (lo, hi) in ranges:
+        if lo > hi:
+            mask |= (aspect >= lo) | (aspect < hi)
+        else:
+            mask |= (aspect >= lo) & (aspect < hi)
+    r = np.where(mask, 255, 0).astype(np.uint8)
+    g = np.where(mask, 255, 0).astype(np.uint8)
+    b = np.where(mask, 255, 0).astype(np.uint8)
+    with rasterio.open(
+        output_path, 'w', driver='GTiff',
+        height=aspect.shape[0], width=aspect.shape[1],
+        count=3, dtype=np.uint8,
+        crs=crs, transform=transform, compress='lzw',
+    ) as dst:
+        dst.write(r, 1)
+        dst.write(g, 2)
+        dst.write(b, 3)
+    print(f"  Exported aspect mask {dir_key}: {output_path}")
+
+
+def export_rgba_tri(tri_data, colormap, transform, crs, output_path):
+    """
+    4-band RGBA GeoTIFF for TRI.
+    Pixels below 20th percentile (of tri > 0) are fully transparent.
+    Pixels from 20th–40th percentile fade in (alpha 0→255).
+    Pixels above 40th percentile are fully opaque.
+    """
+    tri_valid = tri_data[tri_data > 0]
+    if tri_valid.size == 0:
+        p20, p40 = 0.0, 1.0
+        data_max = 1.0
+    else:
+        p20 = float(np.percentile(tri_valid, 20))
+        p40 = float(np.percentile(tri_valid, 40))
+        data_max = float(np.percentile(tri_valid, 98))
+    data_min = 0.0
+
+    norm = np.clip(
+        (tri_data - data_min) / (data_max - data_min + 1e-6),
+        0, 1)
+
+    r_out = np.zeros_like(norm, dtype=np.uint8)
+    g_out = np.zeros_like(norm, dtype=np.uint8)
+    b_out = np.zeros_like(norm, dtype=np.uint8)
+    a_out = np.zeros_like(norm, dtype=np.uint8)
+
+    cm = sorted(colormap, key=lambda x: x[0])
+    for i in range(len(cm) - 1):
+        v0, r0, g0, b0 = cm[i]
+        v1, r1, g1, b1 = cm[i + 1]
+        n0 = (v0 - data_min) / (data_max - data_min + 1e-6)
+        n1 = (v1 - data_min) / (data_max - data_min + 1e-6)
+        mask = (norm >= n0) & (norm < n1)
+        t = np.where(mask, (norm - n0) / (n1 - n0 + 1e-6), 0)
+        r_out = np.where(mask,
+                         np.clip(r0 + t * (r1 - r0), 0, 255).astype(np.uint8), r_out)
+        g_out = np.where(mask,
+                         np.clip(g0 + t * (g1 - g0), 0, 255).astype(np.uint8), g_out)
+        b_out = np.where(mask,
+                         np.clip(b0 + t * (b1 - b0), 0, 255).astype(np.uint8), b_out)
+    v_last, r_last, g_last, b_last = cm[-1]
+    n_last = (v_last - data_min) / (data_max - data_min + 1e-6)
+    mask_last = norm >= n_last
+    r_out = np.where(mask_last, r_last, r_out)
+    g_out = np.where(mask_last, g_last, g_out)
+    b_out = np.where(mask_last, b_last, b_out)
+
+    # Alpha: below p20 = 0, p20–p40 = fade in, above p40 = 255
+    a_out = np.where(tri_data <= 0, 0, a_out)
+    a_out = np.where(tri_data > 0, np.where(tri_data < p20, 0, a_out), a_out)
+    a_out = np.where(
+        (tri_data >= p20) & (tri_data < p40),
+        np.clip((tri_data - p20) / (p40 - p20 + 1e-6) * 255, 0, 255).astype(np.uint8),
+        a_out)
+    a_out = np.where(tri_data >= p40, 255, a_out)
+    a_out = a_out.astype(np.uint8)
+
+    with rasterio.open(
+        output_path, 'w', driver='GTiff',
+        height=tri_data.shape[0],
+        width=tri_data.shape[1],
+        count=4,
+        dtype=np.uint8,
+        crs=crs,
+        transform=transform,
+        compress='lzw',
+    ) as dst:
+        dst.write(r_out, 1)
+        dst.write(g_out, 2)
+        dst.write(b_out, 3)
+        dst.write(a_out, 4)
+    print(f"  Exported RGBA TRI: {output_path}")
+
+
 def process(west, south, east, north, name,
             dangerous_aspects=None, danger_level=2):
     safe_name = name.lower().replace(' ', '_')
@@ -451,10 +563,14 @@ def process(west, south, east, north, name,
     export_rgb_colorized(aspect, ASPECT_COLORMAP, transform, crs,
         os.path.join(OUTPUT_DIR, f'aspect_{safe_name}_rgb.tif'),
         data_min=0, data_max=360)
-    tri_max = float(np.percentile(tri, 98))
-    export_rgb_colorized(tri.astype(np.float64), TRI_COLORMAP, transform, crs,
-        os.path.join(OUTPUT_DIR, f'tri_{safe_name}_rgb.tif'),
-        data_min=0, data_max=tri_max)
+    print("Exporting aspect direction masks...")
+    for dir_key, ranges in ASPECT_DIRECTIONS.items():
+        export_aspect_mask(
+            aspect, dir_key, ranges, transform, crs,
+            os.path.join(OUTPUT_DIR,
+                f'aspect_{dir_key.lower()}_california_rgb.tif'))
+    export_rgba_tri(tri.astype(np.float64), TRI_COLORMAP, transform, crs,
+        os.path.join(OUTPUT_DIR, f'tri_{safe_name}_rgb.tif'))
     export_rgb_colorized(composite.astype(np.float64), COMPOSITE_COLORMAP,
         transform, crs,
         os.path.join(OUTPUT_DIR, f'composite_{safe_name}_rgb.tif'),

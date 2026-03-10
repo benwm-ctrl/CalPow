@@ -8,6 +8,7 @@ import LayerTogglePanel from '../components/LayerTogglePanel'
 import RouteBuilder from '../components/RouteBuilder'
 import ElevationProfile from '../components/ElevationProfile'
 import DangerSummary from '../components/DangerSummary'
+import AspectElevationRose from '../components/AspectElevationRose'
 import { fetchForecast, FALLBACK_URLS } from '../services/avalancheForecast'
 import { analyzeSegments, calcRouteRiskScore, calcHazardExposure } from '../utils/dangerAnalysis'
 
@@ -195,6 +196,13 @@ export default function MapPage() {
   const [hazardExposure, setHazardExposure] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [activeLayers, setActiveLayers] = useState([])
+  const [slopeLegendCollapsed, setSlopeLegendCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('calpow_slope_legend_collapsed') === 'true'
+    } catch {
+      return false
+    }
+  })
   const POPUP_WIDTH = 220
   const POPUP_HEIGHT = 280
   const MARGIN = 12
@@ -208,6 +216,7 @@ export default function MapPage() {
         setMapRegionForecast(f)
         setForecast(f)
         console.log('forecast stored in routeStore:', f)
+        console.log('Full forecast data:', JSON.stringify(f, null, 2))
       }
     })
     return () => { cancelled = true }
@@ -835,67 +844,132 @@ export default function MapPage() {
         ))}
       </div>
 
-      {/* Terrain layer legend — bottom-left, above route builder */}
-      {activeLayers.length > 0 &&
-        activeLayers[0] &&
-        LAYER_LEGENDS[activeLayers[0]] && (
+      {/* Right-side stack: layers panel, slope legend, aspect rose */}
+      {mapReady && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '16px',
+            right: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            alignItems: 'flex-end',
+            zIndex: 10,
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+          >
+            <LayerTogglePanel
+              currentStyle={currentStyle}
+              onStyleChange={setMapStyle}
+              satelliteStyleUrl={SATELLITE_STYLE}
+              topoStyleUrl={TOPO_STYLE}
+              activeLayers={activeLayers}
+              onLayerToggle={setActiveLayers}
+            />
+          </motion.div>
+
+          {/* Slope angle legend panel */}
           <div
             style={{
-              position: 'absolute',
-              bottom: '120px',
-              left: '16px',
               background: 'rgba(15, 25, 40, 0.92)',
               backdropFilter: 'blur(8px)',
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: '10px',
-              padding: '12px 14px',
-              zIndex: 10,
+              padding: '8px 10px',
               minWidth: '180px',
             }}
           >
             <div
               style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                color: '#F7FAFC',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                marginBottom: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                marginBottom: slopeLegendCollapsed ? 0 : 8,
+                borderBottom: slopeLegendCollapsed ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                paddingBottom: slopeLegendCollapsed ? 0 : 8,
               }}
             >
-              {LAYER_LEGENDS[activeLayers[0]].title}
-            </div>
-            {LAYER_LEGENDS[activeLayers[0]].stops.map((stop, i) => (
-              <div
-                key={i}
+              <span
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  marginBottom: '4px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: '#F7FAFC',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
                 }}
               >
-                <div
-                  style={{
-                    width: '14px',
-                    height: '14px',
-                    borderRadius: '3px',
-                    backgroundColor: stop.color,
-                    flexShrink: 0,
-                  }}
-                />
-                <span
-                  style={{
-                    fontSize: '11px',
-                    color: '#CBD5E0',
-                  }}
-                >
-                  {stop.label}
-                </span>
-              </div>
-            ))}
+                SLOPE ANGLE
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !slopeLegendCollapsed
+                  setSlopeLegendCollapsed(next)
+                  try {
+                    localStorage.setItem('calpow_slope_legend_collapsed', String(next))
+                  } catch (_) {}
+                }}
+                style={{
+                  padding: 2,
+                  borderRadius: 4,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#A0AEC0',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                }}
+                className="hover:opacity-80"
+                aria-label={slopeLegendCollapsed ? 'Expand' : 'Collapse'}
+              >
+                {slopeLegendCollapsed ? '▶' : '▼'}
+              </button>
+            </div>
+            {!slopeLegendCollapsed && (
+              <>
+                {activeLayers.length > 0 && activeLayers[0] && LAYER_LEGENDS[activeLayers[0]] ? (
+                  LAYER_LEGENDS[activeLayers[0]].stops.map((stop, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '14px',
+                          height: '14px',
+                          borderRadius: '3px',
+                          backgroundColor: stop.color,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ fontSize: '11px', color: '#CBD5E0' }}>{stop.label}</span>
+                    </div>
+                  ))
+                ) : (
+                  <span style={{ fontSize: '11px', color: '#A0AEC0' }}>
+                    Select a terrain layer above
+                  </span>
+                )}
+              </>
+            )}
           </div>
-        )}
+
+          <AspectElevationRose
+            forecastData={mapRegionForecast}
+            region={currentRegion}
+          />
+        </div>
+      )}
 
       {/* Avalanche danger for current region */}
       {mapReady && (mapRegionForecast || currentRegion) && (
@@ -976,20 +1050,6 @@ export default function MapPage() {
               />
             )}
           </div>
-          <motion.div
-            initial={{ opacity: 0, x: 12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
-          >
-            <LayerTogglePanel
-              currentStyle={currentStyle}
-              onStyleChange={setMapStyle}
-              satelliteStyleUrl={SATELLITE_STYLE}
-              topoStyleUrl={TOPO_STYLE}
-              activeLayers={activeLayers}
-              onLayerToggle={setActiveLayers}
-            />
-          </motion.div>
           <motion.div
             initial={{ opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}

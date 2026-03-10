@@ -89,14 +89,14 @@
     "region": "california",
     "layer": "aspect"
   },
-  "tri_california": {
-    "tileset_id": "benwm.calpow_tri_califo_r",
-    "region": "california",
-    "layer": "tri"
-  },
   "composite_california": {
     "tileset_id": "benwm.calpow_compo_califo_r",
     "region": "california",
     "layer": "composite"
+  },
+  "tri_california": {
+    "tileset_id": "benwm.calpow_tri_califo_r",
+    "region": "california",
+    "layer": "tri"
   }
 }

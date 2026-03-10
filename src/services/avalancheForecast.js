@@ -9,6 +9,14 @@ const CENTER_IDS = {
 
 const BRIDGEPORT_CENTER_IDS = ['BAC', 'BTAC', 'BARC']
 
+// Zone IDs for v2/public/forecast endpoint (full structured forecast)
+const ZONE_IDS = {
+  sierra: 1082,         // SAC Central Sierra
+  shasta: 1084,          // MSAC Shasta
+  bridgeport: 1086,      // BAC Bridgeport
+  eastern_sierra: 1088,  // ESAC Eastern Sierra
+}
+
 const DANGER_LABELS = {
   1: 'Low',
   2: 'Moderate',
@@ -92,6 +100,23 @@ export async function fetchForecast(region) {
   const cached = await getCachedForecast(region)
   if (cached) return cached
 
+  // Fetch full structured forecast from v2/public/forecast for this region and log (Sierra = 1082)
+  const zoneId = ZONE_IDS[region]
+  if (zoneId != null) {
+    try {
+      const forecastRes = await fetch(
+        `https://api.avalanche.org/v2/public/forecast?zone_id=${zoneId}`
+      )
+      const forecastData = await forecastRes.json()
+      console.log(
+        'Full forecast data (v2/public/forecast):',
+        JSON.stringify(forecastData, null, 2)
+      )
+    } catch (e) {
+      console.warn('Structured forecast fetch failed for zone', zoneId, e)
+    }
+  }
+
   const centerIds =
     region === 'bridgeport'
       ? BRIDGEPORT_CENTER_IDS
@@ -164,6 +189,7 @@ export async function fetchForecast(region) {
           travel_advice: f.properties?.travel_advice,
           link: f.properties?.link,
         })),
+        _apiResponse: data,
       }
 
       await upsertForecastCache(region, forecast)
