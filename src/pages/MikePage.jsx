@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { sendMessageToMike } from '../services/groq'
+import { useRouteStore } from '../store/routeStore'
 import { Send } from 'lucide-react'
 import mikeImg from '../assets/images/Salm_Miles-Clark-1.jpg'
 
@@ -25,6 +26,7 @@ function formatTime(date) {
 }
 
 export default function MikePage() {
+  const forecast = useRouteStore((s) => s.forecast)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -57,7 +59,7 @@ export default function MikePage() {
         role: m.role,
         content: m.content,
       }))
-      const reply = await sendMessageToMike(history)
+      const reply = await sendMessageToMike(history, forecast)
       setMessages((prev) => [
         ...prev,
         { role: 'assistant', content: reply, timestamp: new Date() },

@@ -3,12 +3,87 @@ import { useEffect, useMemo, useState } from 'react'
 const ASPECTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 const ELEVATIONS = ['above', 'near', 'below'] // outer to inner: above treeline, near, below
 
+const ASPECT_LOCATION_MAP = {
+  north: 0,
+  northeast: 1,
+  east: 2,
+  southeast: 3,
+  south: 4,
+  southwest: 5,
+  west: 6,
+  northwest: 7,
+}
+const ELEVATION_LOCATION_MAP = {
+  upper: 0,   // above treeline
+  middle: 1,  // near treeline
+  lower: 2,   // below treeline
+}
+
 const DANGER_COLORS = {
   1: '#38A169',
   2: '#D69E2E',
   3: '#DD6B20',
   4: '#E53E3E',
   5: '#1a1a1a',
+}
+
+const PROBLEM_TYPE_COLORS = {
+  'Wet Loose': '#3b82f6',
+  'Wind Slab': '#8b5cf6',
+  'Storm Slab': '#eab308',
+  'Persistent Slab': '#f97316',
+  'Deep Persistent': '#ef4444',
+  'Loose Dry': '#6b7280',
+  'Cornice': '#ec4899',
+  'Glide': '#22c55e',
+}
+
+function normalizeProblemType(name) {
+  if (!name || typeof name !== 'string') return ''
+  const normalized = name.trim()
+  for (const key of Object.keys(PROBLEM_TYPE_COLORS)) {
+    if (key.toLowerCase() === normalized.toLowerCase()) return key
+  }
+  return normalized
+}
+
+/**
+ * Build 8x3 grid of problem-type colors from detailedForecast.forecast_avalanche_problems[].location.
+ * Location strings: "{aspect} {elevation}" e.g. "north upper", "southeast middle".
+ * Returns { grid: string[][] (color per cell), activeProblemTypes: { name, color }[] }.
+ */
+function buildProblemGrid(detailedForecast) {
+  const grid = Array(8)
+    .fill(null)
+    .map(() => Array(3).fill(null))
+  const activeTypes = new Map()
+
+  const problems = detailedForecast?.forecast_avalanche_problems ?? detailedForecast?.avalanche_problems ?? []
+  if (!Array.isArray(problems)) return { grid, activeProblemTypes: [] }
+
+  for (const problem of problems) {
+    const locations = problem.location ?? problem.locations ?? []
+    if (!Array.isArray(locations)) continue
+    const problemType = normalizeProblemType(problem.name ?? problem.avalanche_problem_type ?? problem.type)
+    const color = problemType ? (PROBLEM_TYPE_COLORS[problemType] ?? '#6b7280') : '#6b7280'
+    if (problemType) activeTypes.set(problemType, color)
+
+    for (const loc of locations) {
+      const s = String(loc).trim().toLowerCase()
+      const parts = s.split(/\s+/)
+      if (parts.length < 2) continue
+      const aspectKey = parts[0]
+      const elevKey = parts[1]
+      const a = ASPECT_LOCATION_MAP[aspectKey]
+      const e = ELEVATION_LOCATION_MAP[elevKey]
+      if (a != null && e != null && grid[a][e] == null) {
+        grid[a][e] = color
+      }
+    }
+  }
+
+  const activeProblemTypes = Array.from(activeTypes.entries()).map(([name, color]) => ({ name, color }))
+  return { grid, activeProblemTypes }
 }
 
 /**
@@ -61,7 +136,7 @@ function buildDangerGrid(forecastData) {
   return grid
 }
 
-export default function AspectElevationRose({ forecastData, region }) {
+export default function AspectElevationRose({ forecastData, detailedForecast, region }) {
   const STORAGE_KEY = 'calpow_aspect_rose_collapsed'
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -86,7 +161,10 @@ export default function AspectElevationRose({ forecastData, region }) {
     }
   }, [forecastData])
 
-  const grid = useMemo(() => buildDangerGrid(forecastData), [forecastData])
+  const dangerGrid = useMemo(() => buildDangerGrid(forecastData), [forecastData])
+  const problemResult = useMemo(() => buildProblemGrid(detailedForecast), [detailedForecast])
+  const useProblemGrid = problemResult.activeProblemTypes.length > 0 &&
+    problemResult.grid.some((row) => row.some((c) => c != null))
 
   const size = 120
   const cx = size / 2
@@ -187,15 +265,27 @@ export default function AspectElevationRose({ forecastData, region }) {
         {/* Segments */}
         {ASPECTS.map((_, a) =>
           ELEVATIONS.map((_, e) => {
-            const danger = grid[a][e]
-            const fill = danger > 0 ? DANGER_COLORS[danger] ?? '#4A5568' : 'transparent'
+            let fill = 'transparent'
+            let fillOpacity = 0
+            let stroke = 'rgba(255,255,255,0.08)'
+            if (useProblemGrid) {
+              const color = problemResult.grid[a][e]
+              fill = color ?? 'transparent'
+              fillOpacity = color ? 0.9 : 0
+              stroke = color ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)'
+            } else {
+              const danger = dangerGrid[a][e]
+              fill = danger > 0 ? DANGER_COLORS[danger] ?? '#4A5568' : 'transparent'
+              fillOpacity = danger > 0 ? 0.85 : 0
+              stroke = danger > 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)'
+            }
             return (
               <path
                 key={`${a}-${e}`}
                 d={getSectorPath(a, e)}
                 fill={fill}
-                fillOpacity={danger > 0 ? 0.85 : 0}
-                stroke={danger > 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)'}
+                fillOpacity={fillOpacity}
+                stroke={stroke}
                 strokeWidth="0.5"
               />
             )
@@ -216,7 +306,7 @@ export default function AspectElevationRose({ forecastData, region }) {
         ))}
       </svg>
 
-      {/* Legend: 3 rings */}
+      {/* Legend: 3 rings + problem types or danger */}
       <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
         {[
           { label: 'Above treeline', color: 'rgba(255,255,255,0.5)' },
@@ -245,9 +335,40 @@ export default function AspectElevationRose({ forecastData, region }) {
             <span>{label}</span>
           </div>
         ))}
-        <div style={{ marginTop: '2px', fontSize: '8px', color: '#718096' }}>
-          Color = danger (1–5)
-        </div>
+        {useProblemGrid && problemResult.activeProblemTypes.length > 0 ? (
+          <>
+            <div style={{ marginTop: '4px', fontSize: '8px', color: '#718096', fontWeight: 600 }}>
+              Problem types
+            </div>
+            {problemResult.activeProblemTypes.map(({ name, color }) => (
+              <div
+                key={name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '8px',
+                  color: '#A0AEC0',
+                }}
+              >
+                <div
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 2,
+                    backgroundColor: color,
+                    flexShrink: 0,
+                  }}
+                />
+                <span>{name}</span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <div style={{ marginTop: '2px', fontSize: '8px', color: '#718096' }}>
+            Color = danger (1–5)
+          </div>
+        )}
       </div>
         </>
       )}

@@ -329,9 +329,9 @@ def export_rgb_colorized(data, colormap, transform, crs, output_path,
 def export_rgba_slope(slope_data, colormap, transform, crs, output_path):
     """
     4-band RGBA GeoTIFF for slope.
-    Pixels below 27° are fully transparent (alpha=0).
-    Pixels 27-30° fade in from 0-255 alpha.
-    Pixels above 30° are fully opaque (alpha=255).
+    Pixels below 25° are fully transparent (alpha=0).
+    Pixels 25-28° fade in from 0-255 alpha.
+    Pixels above 28° are fully opaque (alpha=255).
     """
     data_min, data_max = 0, 60
     norm = np.clip(
@@ -366,15 +366,15 @@ def export_rgba_slope(slope_data, colormap, transform, crs, output_path):
     b_out = np.where(mask_last, b_last, b_out)
 
     # Alpha channel:
-    # below 27° = 0 (transparent)
-    # 27-30° = fade in 0-255
-    # above 30° = 255 (opaque)
-    a_out = np.where(slope_data < 27, 0, a_out)
+    # below 25° = 0 (transparent)
+    # 25-28° = fade in 0-255
+    # above 28° = 255 (opaque)
+    a_out = np.where(slope_data < 25, 0, a_out)
     a_out = np.where(
-        (slope_data >= 27) & (slope_data < 30),
-        ((slope_data - 27) / 3 * 255).astype(np.uint8),
+        (slope_data >= 25) & (slope_data < 28),
+        ((slope_data - 25) / 3 * 255).astype(np.uint8),
         a_out)
-    a_out = np.where(slope_data >= 30, 255, a_out)
+    a_out = np.where(slope_data >= 28, 255, a_out)
     a_out = a_out.astype(np.uint8)
 
     with rasterio.open(

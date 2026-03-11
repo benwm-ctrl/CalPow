@@ -60,3 +60,12 @@
   50% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
 }
+
+/* Pan hint faint pulse */
+@keyframes pan-hint-pulse {
+  0%, 100% { opacity: 0.88; }
+  50% { opacity: 1; }
+}
+.pan-hint-pulse {
+  animation: pan-hint-pulse 2.5s ease-in-out infinite;
+}

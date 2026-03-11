@@ -1,7 +1,7 @@
 import { useLocation, Routes, Route, Outlet } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import Navbar from './Navbar'
-import AuthGuard from './AuthGuard'
+import ProtectedRoute from './ProtectedRoute'
 import HomePage from '../pages/HomePage'
 import LoginPage from '../pages/LoginPage'
 import MapPage from '../pages/MapPage'
@@ -39,9 +39,9 @@ export default function AppContent() {
             <Route path="/login" element={<LoginPage />} />
             <Route
               element={
-                <AuthGuard>
+                <ProtectedRoute>
                   <Outlet />
-                </AuthGuard>
+                </ProtectedRoute>
               }
             >
               <Route path="/map" element={<MapPage />} />

@@ -180,6 +180,8 @@ export default function MapPage() {
   const [mapReady, setMapReady] = useState(false)
   const [currentStyle, setCurrentStyle] = useState('satellite')
   const [currentRegion, setCurrentRegion] = useState('sierra')
+  const [showPanHint, setShowPanHint] = useState(true)
+  const panHintDismissedRef = useRef(false)
   const [searchValue, setSearchValue] = useState('')
   const [terrainPopup, setTerrainPopup] = useState(null)
   const [selectedDangerSeg, setSelectedDangerSeg] = useState(null)
@@ -193,6 +195,7 @@ export default function MapPage() {
   const pendingBounds = useRouteStore((s) => s.pendingBounds)
   const clearPendingBounds = useRouteStore((s) => s.clearPendingBounds)
   const [mapRegionForecast, setMapRegionForecast] = useState(null)
+  const [detailedForecast, setDetailedForecast] = useState(null)
   const [hazardExposure, setHazardExposure] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [activeLayers, setActiveLayers] = useState([])
@@ -221,6 +224,21 @@ export default function MapPage() {
     })
     return () => { cancelled = true }
   }, [currentRegion, setStoreForecast])
+
+  useEffect(() => {
+    let cancelled = false
+    setDetailedForecast(null)
+    const base = typeof window !== 'undefined' ? window.location.origin : ''
+    fetch(`${base}/api/forecast-proxy-sac?region=${currentRegion}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setDetailedForecast(data)
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn('Detailed forecast fetch failed:', err)
+      })
+    return () => { cancelled = true }
+  }, [currentRegion])
 
   const handleRightClick = useCallback(async (e) => {
     e.preventDefault()
@@ -812,6 +830,30 @@ export default function MapPage() {
     setHazardExposure(calcHazardExposure(analysisSegments))
   }, [waypoints, forecast, setDangerSegments, setRouteRisk])
 
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return
+    const map = mapRef.current
+    const hideHint = () => {
+      if (panHintDismissedRef.current) return
+      panHintDismissedRef.current = true
+      setShowPanHint(false)
+      map.off('mousedown', hideHint)
+      map.off('click', hideHint)
+      map.off('zoom', hideHint)
+      map.off('zoomend', hideHint)
+    }
+    map.on('mousedown', hideHint)
+    map.on('click', hideHint)
+    map.on('zoom', hideHint)
+    map.on('zoomend', hideHint)
+    return () => {
+      map.off('mousedown', hideHint)
+      map.off('click', hideHint)
+      map.off('zoom', hideHint)
+      map.off('zoomend', hideHint)
+    }
+  }, [mapReady])
+
   return (
     <div className="w-full" style={{ position: 'relative', height: 'calc(100vh - 3.5rem)', overflow: 'visible' }}>
       <div
@@ -820,6 +862,34 @@ export default function MapPage() {
         style={{ height: 'calc(100vh - 3.5rem)' }}
         aria-label="Map"
       />
+
+      {/* Pan hint — center, rounded box, pulses until first click or zoom */}
+      <div
+        className={showPanHint ? 'pan-hint-pulse' : ''}
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          padding: '10px 18px',
+          borderRadius: '12px',
+          background: 'rgba(30, 45, 61, 0.65)',
+          color: 'rgba(255,255,255,0.95)',
+          fontSize: '13px',
+          fontWeight: '400',
+          letterSpacing: '0.08em',
+          pointerEvents: 'none',
+          userSelect: 'none',
+          textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+          transition: showPanHint ? 'opacity 0.2s ease' : 'none',
+          opacity: showPanHint ? 1 : 0,
+          fontStyle: 'italic',
+          whiteSpace: 'nowrap',
+          zIndex: 5,
+        }}
+      >
+        Ctrl + drag to pan around
+      </div>
 
       {/* Region selector — top-left */}
       <div className="absolute top-4 left-4 flex flex-wrap gap-2 z-10">
@@ -966,6 +1036,7 @@ export default function MapPage() {
 
           <AspectElevationRose
             forecastData={mapRegionForecast}
+            detailedForecast={detailedForecast}
             region={currentRegion}
           />
         </div>

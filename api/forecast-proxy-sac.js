@@ -1,29 +1,28 @@
+const ZONE_IDS = {
+  sierra: { center: 'SAC', zone: 2458 },
+  shasta: { center: 'MSAC', zone: 1833 },
+  bridgeport: { center: 'BAC', zone: 3004 },
+  eastern_sierra: { center: 'ESAC', zone: 128 },
+}
+
 export default async function handler(req, res) {
   const { region } = req.query
+  const zone = ZONE_IDS[region]
+  if (!zone) return res.status(400).json({ error: 'unknown region' })
 
-  const URLS = {
-    sierra: 'https://www.sierraavalanchecenter.org/forecasts/avalanche/central-sierra-nevada/json',
-    shasta: 'https://www.shastaavalanche.org/forecast/json',
-    bridgeport: 'https://bridgeportavalanchecenter.org/forecast/json',
-    eastern_sierra: 'https://esavalanche.org/forecast/json',
-  }
-
-  const url = URLS[region]
-  if (!url) return res.status(400).json({ error: 'unknown region' })
+  const url = `https://api.avalanche.org/v2/public/product?type=forecast&center_id=${zone.center}&zone_id=${zone.zone}`
 
   try {
     const response = await fetch(url, {
       headers: {
         'Accept': 'application/json',
-        'User-Agent': 'CalPow/1.0 backcountry-ski-app'
+        'User-Agent': 'CalPow/1.0 benwm@stanford.edu'
       }
     })
-    const text = await response.text()
-    console.log('SAC response:', text.substring(0, 500))
-    const data = JSON.parse(text)
+    const data = await response.json()
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.status(200).json(data)
   } catch (err) {
-    res.status(500).json({ error: err.message, url })
+    res.status(500).json({ error: err.message })
   }
 }
