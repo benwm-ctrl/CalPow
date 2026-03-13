@@ -1,19 +1,58 @@
 import { useRef, useEffect, useState } from 'react'
 import { useRouteStore } from '../store/routeStore'
-import { Route, Upload, Download, Undo2, Trash2, Bookmark } from 'lucide-react'
 import GpxParser from 'gpxparser'
 import SaveRouteModal from './SaveRouteModal'
 
+// ── Inline SVG icons ──────────────────────────────────────────────────────────
+const IconRoute = () => (
+  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="2.5" cy="2.5" r="1.5"/>
+    <circle cx="10.5" cy="10.5" r="1.5"/>
+    <path d="M2.5 4v1.5C2.5 7.5 4 8 6.5 8s4 .5 4 2V9"/>
+  </svg>
+)
+const IconUpload = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <path d="M6 8V2M3.5 4.5L6 2l2.5 2.5"/>
+    <path d="M1 9.5v1a.5.5 0 00.5.5h9a.5.5 0 00.5-.5v-1"/>
+  </svg>
+)
+const IconDownload = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <path d="M6 2v6M3.5 5.5L6 8l2.5-2.5"/>
+    <path d="M1 9.5v1a.5.5 0 00.5.5h9a.5.5 0 00.5-.5v-1"/>
+  </svg>
+)
+const IconUndo = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <path d="M2 5H7.5a3 3 0 010 6H5"/>
+    <path d="M4.5 2.5L2 5l2.5 2.5"/>
+  </svg>
+)
+const IconTrash = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <path d="M1.5 3h9M4 3V2h4v1M5 5.5v3M7 5.5v3M2.5 3l.7 7h5.6l.7-7"/>
+  </svg>
+)
+const IconBookmark = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <path d="M2 2h8v9L6 8.5 2 11V2z"/>
+  </svg>
+)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LABEL = {
+  fontFamily: "'Barlow Condensed', sans-serif",
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+}
+
 function buildGpxXml(waypoints) {
   const date = new Date().toISOString().slice(0, 10)
-  const trkpts = waypoints
-    .map((wp) => {
-      const lon = wp[0]
-      const lat = wp[1]
-      const ele = wp[2] ?? 0
-      return `    <trkpt lat="${lat}" lon="${lon}"><ele>${ele}</ele></trkpt>`
-    })
-    .join('\n')
+  const trkpts = waypoints.map((wp) => {
+    const [lon, lat, ele = 0] = wp
+    return `    <trkpt lat="${lat}" lon="${lon}"><ele>${ele}</ele></trkpt>`
+  }).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="CalPow" xmlns="http://www.topografix.com/GPX/1/1">
   <trk>
@@ -22,8 +61,7 @@ function buildGpxXml(waypoints) {
 ${trkpts}
     </trkseg>
   </trk>
-</gpx>
-`
+</gpx>`
 }
 
 function downloadGpx(waypoints) {
@@ -37,11 +75,55 @@ function downloadGpx(waypoints) {
   URL.revokeObjectURL(url)
 }
 
+const Btn = ({ onClick, disabled, children, variant = 'default', style: extraStyle = {} }) => {
+  const variants = {
+    default: {
+      border: '1px solid rgba(240,237,232,0.15)',
+      backgroundColor: 'transparent',
+      color: disabled ? 'rgba(240,237,232,0.2)' : 'rgba(240,237,232,0.55)',
+    },
+    primary: {
+      border: '1px solid rgba(240,237,232,0.5)',
+      backgroundColor: 'rgba(240,237,232,0.1)',
+      color: disabled ? 'rgba(240,237,232,0.3)' : '#F0EDE8',
+    },
+    save: {
+      border: '1px solid rgba(74,222,128,0.4)',
+      backgroundColor: 'rgba(74,222,128,0.08)',
+      color: disabled ? 'rgba(74,222,128,0.2)' : 'rgba(74,222,128,0.85)',
+    },
+  }
+  const v = variants[variant]
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 7,
+        padding: '7px 11px',
+        ...v,
+        ...LABEL,
+        fontSize: 10, fontWeight: 700,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'border-color 0.15s, color 0.15s, background-color 0.15s',
+        whiteSpace: 'nowrap',
+        ...extraStyle,
+      }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.borderColor = v.color }}
+      onMouseLeave={e => { if (!disabled) e.currentTarget.style.borderColor = v.border.replace('1px solid ', '') }}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function RouteBuilder({ mapRef, mapReady }) {
   const fileInputRef = useRef(null)
   const buildingModeRef = useRef(false)
   const routeModeRef = useRef('skin')
   const [saveModalOpen, setSaveModalOpen] = useState(false)
+
   const waypoints = useRouteStore((s) => s.waypoints)
   const buildingMode = useRouteStore((s) => s.buildingMode)
   const routeMode = useRouteStore((s) => s.routeMode)
@@ -53,29 +135,20 @@ export default function RouteBuilder({ mapRef, mapReady }) {
 
   buildingModeRef.current = buildingMode
   routeModeRef.current = routeMode
-  useEffect(() => {
-    buildingModeRef.current = buildingMode
-  }, [buildingMode])
+
+  useEffect(() => { buildingModeRef.current = buildingMode }, [buildingMode])
 
   useEffect(() => {
     if (!mapReady) return
-
-    // Poll for map being available (handles hot reload)
     let map = mapRef?.current
     const cleanupRef = { current: null }
 
     if (!map) {
       const interval = setInterval(() => {
         map = mapRef?.current
-        if (map) {
-          clearInterval(interval)
-          cleanupRef.current = registerClick(map)
-        }
+        if (map) { clearInterval(interval); cleanupRef.current = registerClick(map) }
       }, 100)
-      return () => {
-        clearInterval(interval)
-        cleanupRef.current?.()
-      }
+      return () => { clearInterval(interval); cleanupRef.current?.() }
     }
 
     cleanupRef.current = registerClick(map)
@@ -90,10 +163,8 @@ export default function RouteBuilder({ mapRef, mapReady }) {
           const elev = map.queryTerrainElevation([lng, lat], { exaggerated: false })
           if (typeof elev === 'number' && !Number.isNaN(elev)) elevation = Math.round(elev)
         } catch (_) {}
-        const mode = routeModeRef.current
         const { addWaypoint } = useRouteStore.getState()
-        console.log('✅ waypoint added:', mode, lng.toFixed(4), lat.toFixed(4))
-        addWaypoint([lng, lat, elevation, mode])
+        addWaypoint([lng, lat, elevation, routeModeRef.current])
       }
       map.on('click', handler)
       return () => map.off('click', handler)
@@ -109,30 +180,16 @@ export default function RouteBuilder({ mapRef, mapReady }) {
         const gpx = new GpxParser()
         gpx.parse(reader.result)
         const tracks = gpx.tracks
-        if (!tracks?.length) {
-          alert('No tracks found in GPX file.')
-          return
-        }
+        if (!tracks?.length) { alert('No tracks found in GPX file.'); return }
         const points = tracks[0].points
-        if (!points?.length) {
-          alert('No track points in GPX file.')
-          return
-        }
+        if (!points?.length) { alert('No track points in GPX file.'); return }
         const wps = points.map((p) => [p.lon, p.lat, p.ele ?? 0, 'skin'])
         setWaypoints(wps)
         const lngs = wps.map((w) => w[0])
         const lats = wps.map((w) => w[1])
-        const minLng = Math.min(...lngs)
-        const maxLng = Math.max(...lngs)
-        const minLat = Math.min(...lats)
-        const maxLat = Math.max(...lats)
-        const padding = 40
         mapRef.current.fitBounds(
-          [
-            [minLng, minLat],
-            [maxLng, maxLat],
-          ],
-          { padding, duration: 800 }
+          [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+          { padding: 40, duration: 800 }
         )
       } catch (err) {
         console.error(err)
@@ -148,141 +205,102 @@ export default function RouteBuilder({ mapRef, mapReady }) {
   return (
     <>
       <div
-        className="absolute left-4 z-10 flex flex-col gap-2 transition-[bottom] duration-200 max-w-[calc(100vw-2rem)]"
         style={{
-          bottom: waypoints.length >= 2 ? 170 : 16,
-          background: 'rgba(30, 45, 61, 0.55)',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '8px',
-          padding: '8px',
+          position: 'absolute',
+          left: 16,
+          bottom: waypoints.length >= 2 ? 210 : 24,
+          zIndex: 10,
+          backgroundColor: 'rgba(7,12,16,0.92)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(240,237,232,0.1)',
+          padding: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          maxWidth: 'calc(100vw - 2rem)',
+          transition: 'bottom 0.2s ease',
         }}
       >
-      {/* Build Route / Stop Building */}
-      <button
-        type="button"
-        onClick={() => setBuildingMode(!buildingMode)}
-        className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-white shadow-lg transition-opacity hover:opacity-90"
-        style={{ backgroundColor: '#3B8BEB' }}
-      >
-        <Route className="w-4 h-4" />
-        {buildingMode ? 'Stop Building' : 'Build Route'}
-      </button>
-
-      {buildingMode && (
-        <div
-          style={{
-            display: 'flex',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            border: '1px solid #2D3748',
-            marginTop: '8px',
-          }}
+        {/* Build Route / Stop Building */}
+        <Btn
+          variant="primary"
+          onClick={() => setBuildingMode(!buildingMode)}
+          style={{ justifyContent: 'center' }}
         >
-          <button
-            type="button"
-            onClick={() => setRouteMode('skin')}
-            style={{
-              flex: 1,
-              padding: '8px 12px',
-              fontSize: '13px',
-              fontWeight: 500,
-              backgroundColor: routeMode === 'skin' ? '#3B8BEB' : '#1E2D3D',
-              color: routeMode === 'skin' ? '#fff' : '#718096',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            🎿 Skintrack
-          </button>
-          <button
-            type="button"
-            onClick={() => setRouteMode('descent')}
-            style={{
-              flex: 1,
-              padding: '8px 12px',
-              fontSize: '13px',
-              fontWeight: 500,
-              backgroundColor: routeMode === 'descent' ? '#7C3AED' : '#1E2D3D',
-              color: routeMode === 'descent' ? '#fff' : '#718096',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            🔴 Descent
-          </button>
+          <IconRoute />
+          {buildingMode ? 'Stop Building' : 'Build Route'}
+        </Btn>
+
+        {/* Mode toggle: Skintrack / Descent */}
+        {buildingMode && (
+          <div style={{ display: 'flex', border: '1px solid rgba(240,237,232,0.1)' }}>
+            {[
+              { mode: 'skin', label: 'Skintrack', activeColor: 'rgba(240,237,232,0.1)', activeBorder: 'rgba(240,237,232,0.45)' },
+              { mode: 'descent', label: 'Descent', activeColor: 'rgba(124,58,237,0.15)', activeBorder: 'rgba(167,139,250,0.5)' },
+            ].map(({ mode, label, activeColor, activeBorder }) => {
+              const active = routeMode === mode
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setRouteMode(mode)}
+                  style={{
+                    flex: 1,
+                    padding: '7px 8px',
+                    border: 'none',
+                    borderRight: mode === 'skin' ? '1px solid rgba(240,237,232,0.1)' : 'none',
+                    backgroundColor: active ? activeColor : 'transparent',
+                    color: active ? '#F0EDE8' : 'rgba(240,237,232,0.35)',
+                    ...LABEL,
+                    fontSize: 10, fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s, color 0.15s',
+                    outline: active ? `1px solid ${activeBorder}` : 'none',
+                    outlineOffset: -1,
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Undo / Clear */}
+        {(buildingMode || waypoints.length > 0) && (
+          <div style={{ display: 'flex', gap: 5 }}>
+            <Btn onClick={removeLastWaypoint} disabled={waypoints.length === 0} style={{ flex: 1, justifyContent: 'center' }}>
+              <IconUndo /> Undo
+            </Btn>
+            <Btn onClick={clearWaypoints} disabled={waypoints.length === 0} style={{ flex: 1, justifyContent: 'center' }}>
+              <IconTrash /> Clear
+            </Btn>
+          </div>
+        )}
+
+        {/* Save / Download / Upload */}
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          <Btn variant="save" onClick={() => setSaveModalOpen(true)} disabled={!canExport}>
+            <IconBookmark /> Save Route
+          </Btn>
+          <Btn onClick={() => downloadGpx(waypoints)} disabled={!canExport}>
+            <IconDownload /> Download GPX
+          </Btn>
+          <Btn onClick={() => fileInputRef.current?.click()}>
+            <IconUpload /> Upload GPX
+          </Btn>
         </div>
-      )}
 
-      {/* Undo / Clear — only when building or when there are points */}
-      {(buildingMode || waypoints.length > 0) && (
-        <div className="flex flex-col sm:flex-row gap-2">
-          <button
-            type="button"
-            onClick={removeLastWaypoint}
-            disabled={waypoints.length === 0}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-text-primary bg-background-secondary border border-border hover:bg-background-elevated disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Undo2 className="w-4 h-4" />
-            Undo
-          </button>
-          <button
-            type="button"
-            onClick={clearWaypoints}
-            disabled={waypoints.length === 0}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-text-primary bg-background-secondary border border-border hover:bg-background-elevated disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Trash2 className="w-4 h-4" />
-            Clear
-          </button>
-        </div>
-      )}
-
-      {/* Download GPX / Upload GPX */}
-      <div className="flex flex-col sm:flex-row gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => setSaveModalOpen(true)}
-          disabled={!canExport}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ backgroundColor: '#38A169' }}
-        >
-          <Bookmark className="w-4 h-4" />
-          Save Route
-        </button>
-        <button
-          type="button"
-          onClick={() => downloadGpx(waypoints)}
-          disabled={!canExport}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-text-primary bg-background-secondary border border-border hover:bg-background-elevated disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Download className="w-4 h-4" />
-          Download GPX
-        </button>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-text-primary bg-background-secondary border border-border hover:bg-background-elevated"
-        >
-          <Upload className="w-4 h-4" />
-          Upload GPX
-        </button>
         <input
           ref={fileInputRef}
           type="file"
           accept=".gpx"
-          className="hidden"
+          style={{ display: 'none' }}
           onChange={handleUploadGpx}
         />
       </div>
-      </div>
 
-      <SaveRouteModal
-        isOpen={saveModalOpen}
-        onClose={() => setSaveModalOpen(false)}
-      />
+      <SaveRouteModal isOpen={saveModalOpen} onClose={() => setSaveModalOpen(false)} />
     </>
   )
 }

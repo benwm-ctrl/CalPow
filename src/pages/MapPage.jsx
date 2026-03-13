@@ -10,10 +10,19 @@ import ElevationProfile from '../components/ElevationProfile'
 import DangerSummary from '../components/DangerSummary'
 import AspectElevationRose from '../components/AspectElevationRose'
 import { fetchForecast, FALLBACK_URLS } from '../services/avalancheForecast'
+import { fetchWindGrid } from '../services/windService'
 import { analyzeSegments, calcRouteRiskScore, calcHazardExposure } from '../utils/dangerAnalysis'
 
 const SATELLITE_STYLE = 'mapbox://styles/mapbox/satellite-streets-v12'
 const TOPO_STYLE = 'mapbox://styles/mapbox/outdoors-v12'
+
+const WIND_MIN_ZOOM = 10 // match terrain layers (raster minzoom)
+
+const LABEL = {
+  fontFamily: "'Barlow Condensed', sans-serif",
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+}
 
 const REGIONS = {
   sierra: { center: [-119.5, 38.5], zoom: 8 },
@@ -185,7 +194,6 @@ export default function MapPage() {
   const [searchValue, setSearchValue] = useState('')
   const [terrainPopup, setTerrainPopup] = useState(null)
   const [selectedDangerSeg, setSelectedDangerSeg] = useState(null)
-  const [dangerPopupPos, setDangerPopupPos] = useState(null)
   const waypoints = useRouteStore((s) => s.waypoints)
   const setStoreForecast = useRouteStore((s) => s.setForecast)
   const dangerSegments = useRouteStore((s) => s.dangerSegments)
@@ -199,6 +207,21 @@ export default function MapPage() {
   const [hazardExposure, setHazardExposure] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [activeLayers, setActiveLayers] = useState([])
+  const [windEnabled, setWindEnabled] = useState(false)
+  const [windData, setWindData] = useState([])
+  const [windLoading, setWindLoading] = useState(false)
+  const [windElevation, setWindElevation] = useState('10m') // '10m' | '80m'
+  const [windError, setWindError] = useState(false) // show "Wind data unavailable" toast
+  const [precipRadarEnabled, setPrecipRadarEnabled] = useState(false)
+  const [precipRadarLoading, setPrecipRadarLoading] = useState(false)
+  const [precipRadarPath, setPrecipRadarPath] = useState(null) // RainViewer tile path, updated ~10min
+  const [snowDepthEnabled, setSnowDepthEnabled] = useState(false)
+  const [snowDepthUnavailable, setSnowDepthUnavailable] = useState(false)
+  const windCanvasRef = useRef(null)
+  const windCancelRef = useRef(false)
+  const windDataRef = useRef([])
+  const windElevationRef = useRef('10m')
+  const [mapZoom, setMapZoom] = useState(8)
   const [slopeLegendCollapsed, setSlopeLegendCollapsed] = useState(() => {
     try {
       return localStorage.getItem('calpow_slope_legend_collapsed') === 'true'
@@ -348,20 +371,18 @@ export default function MapPage() {
           type: 'circle',
           source: 'route-points',
           paint: {
-            'circle-radius': 8,
+            'circle-radius': 4,
             'circle-color': [
               'match',
               ['get', 'mode'],
-              'descent',
-              '#A78BFA',
+              'descent', '#A78BFA',
               '#ffffff',
             ],
-            'circle-stroke-width': 2,
+            'circle-stroke-width': 1.5,
             'circle-stroke-color': [
               'match',
               ['get', 'mode'],
-              'descent',
-              '#7C3AED',
+              'descent', '#7C3AED',
               '#3B8BEB',
             ],
           },
@@ -428,13 +449,22 @@ export default function MapPage() {
     if (!waypoints || waypoints.length < 2) {
       map.getSource('route-skin')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-descent')?.setData({ type: 'FeatureCollection', features: [] })
-      map.getSource('route-points')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-caution')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-dangerous')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-extreme')?.setData({ type: 'FeatureCollection', features: [] })
       setDangerSegments([])
       setRouteRisk(null)
       setHazardExposure('0.00')
+
+      // Still render the single waypoint dot
+      map.getSource('route-points')?.setData({
+        type: 'FeatureCollection',
+        features: (waypoints ?? []).map((wp, i) => ({
+          type: 'Feature',
+          properties: { id: i, mode: wp[3] ?? 'skin' },
+          geometry: { type: 'Point', coordinates: [wp[0], wp[1]] },
+        })),
+      })
       return
     }
     // Each segment's mode = the mode of its endpoint (wp[i+1])
@@ -664,19 +694,6 @@ export default function MapPage() {
   }, [mapReady])
 
   useEffect(() => {
-    if (!selectedDangerSeg) {
-      setDangerPopupPos(null)
-      return
-    }
-    const map = mapRef.current
-    if (!map) return
-    const midLng = (selectedDangerSeg.p1[0] + selectedDangerSeg.p2[0]) / 2
-    const midLat = (selectedDangerSeg.p1[1] + selectedDangerSeg.p2[1]) / 2
-    const point = map.project([midLng, midLat])
-    setDangerPopupPos({ x: point.x, y: point.y })
-  }, [selectedDangerSeg])
-
-  useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
 
@@ -723,6 +740,156 @@ export default function MapPage() {
     })
   }, [activeLayers, mapReady])
 
+  // RainViewer precip radar: fetch latest tile path (no API key)
+  const fetchRainViewerPath = useCallback(async () => {
+    const res = await fetch('https://api.rainviewer.com/public/weather-maps.json')
+    const data = await res.json()
+    // nowcast[0] is the most current live frame
+    const nowcast = data?.radar?.nowcast
+    if (Array.isArray(nowcast) && nowcast.length > 0) {
+      return nowcast[0].path
+    }
+    // fallback to latest past frame
+    const past = data?.radar?.past
+    if (Array.isArray(past) && past.length > 0) {
+      return past[past.length - 1].path
+    }
+    return null
+  }, [])
+
+  // Precip radar layer: add/remove source + layer below route/terrain (beforeId: 'route-skin')
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    const sourceId = 'precip-radar'
+    const layerId = 'precip-radar-layer'
+
+    if (!precipRadarEnabled || !precipRadarPath) {
+      if (map.getLayer(layerId)) map.removeLayer(layerId)
+      if (map.getSource(sourceId)) map.removeSource(sourceId)
+      return
+    }
+
+    if (map.getSource(sourceId)) {
+      map.removeLayer(layerId)
+      map.removeSource(sourceId)
+    }
+    const tileUrl = `https://tilecache.rainviewer.com${precipRadarPath}/256/{z}/{x}/{y}/2/1_1.png`
+    map.addSource(sourceId, {
+      type: 'raster',
+      tiles: [tileUrl],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 7,
+      attribution: 'RainViewer',
+    })
+    map.addLayer(
+      {
+        id: layerId,
+        type: 'raster',
+        source: sourceId,
+        paint: {
+          'raster-opacity': 0.65,
+          'raster-resampling': 'linear',
+        },
+      },
+      'route-skin'
+    )
+
+    return () => {
+      if (map.getLayer(layerId)) map.removeLayer(layerId)
+      if (map.getSource(sourceId)) map.removeSource(sourceId)
+    }
+  }, [mapReady, precipRadarEnabled, precipRadarPath])
+
+  // Snow depth (NOHRSC) raster — dynamic export, no API key; insert below precip-radar-layer if present
+  const NOHRSC_SNOW_TILE_URL =
+    'https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/export' +
+    '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&layers=show:0&f=image'
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    const sourceId = 'snow-depth'
+    const layerId = 'snow-depth-layer'
+
+    if (!snowDepthEnabled) {
+      if (map.getLayer(layerId)) map.removeLayer(layerId)
+      if (map.getSource(sourceId)) map.removeSource(sourceId)
+      return
+    }
+
+    if (map.getSource(sourceId)) {
+      map.removeLayer(layerId)
+      map.removeSource(sourceId)
+    }
+
+    map.addSource(sourceId, {
+      type: 'raster',
+      tiles: [NOHRSC_SNOW_TILE_URL],
+      tileSize: 256,
+    })
+    const layerOpts = {
+      id: layerId,
+      type: 'raster',
+      source: sourceId,
+      paint: {
+        'raster-opacity': 0.7,
+        'raster-resampling': 'linear',
+      },
+    }
+    if (map.getLayer('precip-radar-layer')) {
+      map.addLayer(layerOpts, 'precip-radar-layer')
+    } else {
+      map.addLayer(layerOpts, 'route-skin')
+    }
+
+    return () => {
+      if (map.getLayer(layerId)) map.removeLayer(layerId)
+      if (map.getSource(sourceId)) map.removeSource(sourceId)
+    }
+  }, [mapReady, snowDepthEnabled])
+
+  // Optional: probe NOHRSC when snow layer enabled; show brief toast if unavailable
+  useEffect(() => {
+    if (!snowDepthEnabled) {
+      setSnowDepthUnavailable(false)
+      return
+    }
+    let timeoutId
+    const probeUrl =
+      'https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/export' +
+      '?bbox=-13600000,4500000,-13500000,4600000&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&layers=show:0&f=image'
+    fetch(probeUrl)
+      .then((r) => {
+        if (!r.ok) throw new Error('NOHRSC probe failed')
+      })
+      .catch(() => {
+        setSnowDepthUnavailable(true)
+        timeoutId = setTimeout(() => setSnowDepthUnavailable(false), 4000)
+      })
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [snowDepthEnabled])
+
+  // On precip radar enable: fetch path once; then refresh every 10 min while enabled
+  useEffect(() => {
+    if (!precipRadarEnabled) return
+    setPrecipRadarLoading(true)
+    fetchRainViewerPath()
+      .then((path) => {
+        if (path) setPrecipRadarPath(path)
+      })
+      .finally(() => setPrecipRadarLoading(false))
+
+    const interval = setInterval(() => {
+      fetchRainViewerPath().then((path) => {
+        if (path) setPrecipRadarPath(path)
+      })
+    }, 10 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [precipRadarEnabled, fetchRainViewerPath])
+
   useEffect(() => {
     const map = mapRef.current
     if (!mapReady || !map || !pendingBounds) return
@@ -740,16 +907,25 @@ export default function MapPage() {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !routeInitialized.current) return
-    if (waypoints.length < 2) {
+    if (!waypoints || waypoints.length < 2) {
       map.getSource('route-skin')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-descent')?.setData({ type: 'FeatureCollection', features: [] })
-      map.getSource('route-points')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-caution')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-dangerous')?.setData({ type: 'FeatureCollection', features: [] })
       map.getSource('route-extreme')?.setData({ type: 'FeatureCollection', features: [] })
       setDangerSegments([])
       setRouteRisk(null)
       setHazardExposure('0.00')
+
+      // Still render the single waypoint dot
+      map.getSource('route-points')?.setData({
+        type: 'FeatureCollection',
+        features: (waypoints ?? []).map((wp, i) => ({
+          type: 'Feature',
+          properties: { id: i, mode: wp[3] ?? 'skin' },
+          geometry: { type: 'Point', coordinates: [wp[0], wp[1]] },
+        })),
+      })
       return
     }
     // Each segment's mode = the mode of its endpoint (wp[i+1])
@@ -854,6 +1030,175 @@ export default function MapPage() {
     }
   }, [mapReady])
 
+  // Fetch wind grid only (no temp). Wind fetch never passes tempMode.
+  const fetchWindForMap = useCallback(() => {
+    const map = mapRef.current
+    if (!map || !windEnabled) return
+    if (map.getZoom() < WIND_MIN_ZOOM) return
+    windCancelRef.current = false
+    setWindLoading(true)
+    const bounds = map.getBounds()
+    const zoom = map.getZoom()
+    setWindError(false)
+    fetchWindGrid(bounds, zoom)
+      .then((data) => {
+        if (!windCancelRef.current) setWindData(data)
+      })
+      .catch(() => {
+        if (!windCancelRef.current) {
+          setWindData([])
+          setWindEnabled(false)
+          setWindError(true)
+          setTimeout(() => setWindError(false), 4000)
+        }
+      })
+      .finally(() => {
+        if (!windCancelRef.current) setWindLoading(false)
+      })
+  }, [windEnabled])
+
+  useEffect(() => {
+    if (!windEnabled) {
+      setWindData([])
+      windCancelRef.current = true
+      return
+    }
+    const map = mapRef.current
+    if (map && map.getZoom() >= WIND_MIN_ZOOM) fetchWindForMap()
+  }, [windEnabled, fetchWindForMap])
+
+  // Keep refs in sync for redrawWindCanvas (called on every move, no state closure)
+  useEffect(() => {
+    windDataRef.current = windData
+    windElevationRef.current = windElevation
+  }, [windData, windElevation])
+
+  // Pure redraw: existing windData at current map.project() positions. No fetch.
+  const redrawWindCanvas = useCallback(() => {
+    const map = mapRef.current
+    const canvas = windCanvasRef.current
+    const container = mapContainerRef.current
+    const data = windDataRef.current
+    const use80 = windElevationRef.current === '80m'
+    if (!map || !canvas || !container || !data.length) return
+
+    const w = container.offsetWidth
+    const h = container.offsetHeight
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w
+      canvas.height = h
+    }
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, w, h)
+
+    function snapToCardinal(deg) {
+      const dirs = [0, 45, 90, 135, 180, 225, 270, 315]
+      const normalized = ((deg % 360) + 360) % 360
+      return dirs.reduce((prev, curr) =>
+        Math.abs(curr - normalized) < Math.abs(prev - normalized) ? curr : prev
+      )
+    }
+    const directionColor = (deg) => {
+      const snapped = snapToCardinal(deg)
+      const colors = {
+        0: '#60a5fa',    // N  — blue
+        45: '#a78bfa',   // NE — purple
+        90: '#34d399',   // E  — green
+        135: '#fbbf24',  // SE — amber
+        180: '#f87171',  // S  — red
+        225: '#fb923c',  // SW — orange
+        270: '#38bdf8',  // W  — sky
+        315: '#e879f9',  // NW — pink
+      }
+      return colors[snapped]
+    }
+    // Cardinal degrees (met from) → screen angle in radians (0° = right in canvas, clockwise)
+    const cardinalToScreenAngle = (cardinalDeg) => {
+      const goDeg = (cardinalDeg + 180) % 360
+      return ((goDeg - 90) * Math.PI) / 180
+    }
+
+    const arrowScale = (speed) => {
+      if (speed <= 5) return 40
+      if (speed <= 15) return 40 + ((speed - 5) * 30) / 10
+      if (speed <= 25) return 70 + ((speed - 15) * 40) / 10
+      if (speed <= 40) return 110 + ((speed - 25) * 40) / 15
+      return 175
+    }
+    const HEAD_BASE = 14
+    const HEAD_HEIGHT = 18
+
+    data.forEach((pt) => {
+      const speed = use80 ? pt.speed80 : pt.speed
+      const direction = use80 ? pt.direction80 : pt.direction
+      const point = map.project([pt.lng, pt.lat])
+      const px = point.x
+      const py = point.y
+      if (px < -100 || px > w + 100 || py < -100 || py > h + 100) return
+      const snapped = snapToCardinal(direction)
+      const angle = cardinalToScreenAngle(snapped)
+      const len = arrowScale(speed)
+      const tx = px + len * Math.cos(angle)
+      const ty = py + len * Math.sin(angle)
+      const color = directionColor(snapped)
+      ctx.strokeStyle = color
+      ctx.fillStyle = color
+      ctx.globalAlpha = 0.85
+      ctx.lineWidth = 4
+      ctx.beginPath()
+      ctx.moveTo(px, py)
+      ctx.lineTo(tx, ty)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(tx, ty)
+      ctx.lineTo(
+        tx - HEAD_HEIGHT * Math.cos(angle) + (HEAD_BASE / 2) * Math.sin(angle),
+        ty - HEAD_HEIGHT * Math.sin(angle) - (HEAD_BASE / 2) * Math.cos(angle)
+      )
+      ctx.lineTo(
+        tx - HEAD_HEIGHT * Math.cos(angle) - (HEAD_BASE / 2) * Math.sin(angle),
+        ty - HEAD_HEIGHT * Math.sin(angle) + (HEAD_BASE / 2) * Math.cos(angle)
+      )
+      ctx.closePath()
+      ctx.fill()
+    })
+    ctx.globalAlpha = 1
+  }, [])
+
+  // Sync map zoom to state and re-fetch wind on moveend/zoomend only (no fetch on move)
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return
+    const map = mapRef.current
+    const onMoveEnd = () => {
+      setMapZoom(map.getZoom())
+      if (windEnabled && map.getZoom() >= WIND_MIN_ZOOM) fetchWindForMap()
+    }
+    setMapZoom(map.getZoom())
+    map.on('moveend', onMoveEnd)
+    map.on('zoomend', onMoveEnd)
+    return () => {
+      map.off('moveend', onMoveEnd)
+      map.off('zoomend', onMoveEnd)
+    }
+  }, [mapReady, windEnabled, fetchWindForMap])
+
+  // Register move → redraw (live during drag/zoom). Initial draw + redraw when windData/windElevation change.
+  const windVisible = windEnabled && mapZoom >= WIND_MIN_ZOOM
+  useEffect(() => {
+    const map = mapRef.current
+    if (!windVisible || !map) return
+    map.on('move', redrawWindCanvas)
+    redrawWindCanvas()
+    return () => {
+      map.off('move', redrawWindCanvas)
+      const c = windCanvasRef.current
+      if (c) {
+        const ctx = c.getContext('2d')
+        if (ctx) ctx.clearRect(0, 0, c.width, c.height)
+      }
+    }
+  }, [windVisible, windData, windElevation, mapReady, redrawWindCanvas])
+
   return (
     <div className="w-full" style={{ position: 'relative', height: 'calc(100vh - 3.5rem)', overflow: 'visible' }}>
       <div
@@ -863,32 +1208,140 @@ export default function MapPage() {
         aria-label="Map"
       />
 
-      {/* Pan hint — center, rounded box, pulses until first click or zoom */}
-      <div
-        className={showPanHint ? 'pan-hint-pulse' : ''}
-        style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          padding: '10px 18px',
-          borderRadius: '12px',
-          background: 'rgba(30, 45, 61, 0.65)',
-          color: 'rgba(255,255,255,0.95)',
-          fontSize: '13px',
-          fontWeight: '400',
-          letterSpacing: '0.08em',
+      {/* Wind overlay canvas — only visible when zoom >= WIND_MIN_ZOOM (match terrain layers) */}
+      {windEnabled && mapZoom >= WIND_MIN_ZOOM && (
+        <canvas
+          ref={windCanvasRef}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            zIndex: 4,
+          }}
+        />
+      )}
+
+      {/* Wind error toast */}
+      {windError && (
+        <div style={{
+          position: 'absolute', bottom: 24, left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 20,
+          padding: '8px 16px',
+          backgroundColor: 'rgba(7,12,16,0.95)',
+          border: '1px solid rgba(239,83,80,0.4)',
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase',
+          color: 'rgba(240,237,232,0.7)',
           pointerEvents: 'none',
-          userSelect: 'none',
-          textShadow: '0 1px 4px rgba(0,0,0,0.6)',
-          transition: showPanHint ? 'opacity 0.2s ease' : 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+        }}>
+          Wind data unavailable
+        </div>
+      )}
+
+      {/* Snow depth unavailable toast */}
+      {snowDepthUnavailable && (
+        <div style={{
+          position: 'absolute', bottom: 24, left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 20,
+          padding: '8px 16px',
+          backgroundColor: 'rgba(7,12,16,0.95)',
+          border: '1px solid rgba(239,83,80,0.4)',
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase',
+          color: 'rgba(240,237,232,0.7)',
+          pointerEvents: 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+        }}>
+          Snow data unavailable
+        </div>
+      )}
+
+      {/* Wind direction legend — cardinal colors + 10m/80m toggle */}
+      {windEnabled && mapZoom >= WIND_MIN_ZOOM && (
+        <div style={{
+          position: 'absolute',
+          bottom: precipRadarEnabled ? (waypoints?.length >= 2 ? 210 : 130) : (waypoints?.length >= 2 ? 160 : 80),
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 20,
+          backgroundColor: 'rgba(7,12,16,0.88)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(240,237,232,0.1)',
+          padding: '5px 14px',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          {[
+            { label: 'N', color: '#60a5fa' },
+            { label: 'NE', color: '#a78bfa' },
+            { label: 'E', color: '#34d399' },
+            { label: 'SE', color: '#fbbf24' },
+            { label: 'S', color: '#f87171' },
+            { label: 'SW', color: '#fb923c' },
+            { label: 'W', color: '#38bdf8' },
+            { label: 'NW', color: '#e879f9' },
+          ].map(({ label, color }) => (
+            <span key={label} style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 10, fontWeight: 700,
+              letterSpacing: '0.1em', textTransform: 'uppercase',
+              color,
+            }}>
+              {label}
+            </span>
+          ))}
+          <div style={{ width: 1, height: 12, background: 'rgba(240,237,232,0.12)' }}/>
+          <div style={{ display: 'flex', gap: 3 }}>
+            {['10m', '80m'].map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setWindElevation(v)}
+                style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontSize: 9, fontWeight: 700,
+                  letterSpacing: '0.12em', textTransform: 'uppercase',
+                  padding: '2px 7px',
+                  border: `1px solid ${windElevation === v ? 'rgba(240,237,232,0.4)' : 'transparent'}`,
+                  background: windElevation === v ? 'rgba(240,237,232,0.08)' : 'transparent',
+                  color: windElevation === v ? '#F0EDE8' : 'rgba(240,237,232,0.35)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pan hint — center, pulses until first click or zoom */}
+      <div
+        style={{
+          position: 'absolute', top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+          padding: '8px 16px',
+          border: '1px solid rgba(240,237,232,0.15)',
+          backgroundColor: 'rgba(7,12,16,0.75)',
+          backdropFilter: 'blur(8px)',
+          color: 'rgba(240,237,232,0.6)',
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase',
+          fontStyle: 'normal',
+          pointerEvents: 'none', userSelect: 'none',
+          whiteSpace: 'nowrap', zIndex: 5,
+          transition: showPanHint ? 'opacity 0.2s' : 'none',
           opacity: showPanHint ? 1 : 0,
-          fontStyle: 'italic',
-          whiteSpace: 'nowrap',
-          zIndex: 5,
         }}
+        className={showPanHint ? 'pan-hint-pulse' : ''}
       >
-        Ctrl + drag to pan around
+        Ctrl + drag to pan
       </div>
 
       {/* Region selector — top-left */}
@@ -897,17 +1350,25 @@ export default function MapPage() {
           { key: 'sierra', label: 'Sierra' },
           { key: 'shasta', label: 'Shasta' },
           { key: 'bridgeport', label: 'Bridgeport' },
-          { key: 'eastern_sierra', label: 'Eastern Sierra' },
+          { key: 'eastern_sierra', label: 'E. Sierra' },
         ].map(({ key, label }) => (
           <button
             key={key}
             type="button"
             onClick={() => flyToRegion(key)}
-            className="px-3 py-2 rounded text-sm font-medium transition-colors"
             style={{
-              backgroundColor: currentRegion === key ? '#3B8BEB' : '#1E2D3D',
-              color: currentRegion === key ? '#F7FAFC' : '#A0AEC0',
+              padding: '5px 12px',
+              border: `1px solid ${currentRegion === key ? 'rgba(240,237,232,0.7)' : 'rgba(240,237,232,0.15)'}`,
+              backgroundColor: currentRegion === key ? 'rgba(240,237,232,0.1)' : 'transparent',
+              color: currentRegion === key ? '#F0EDE8' : 'rgba(240,237,232,0.4)',
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 10, fontWeight: 700,
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+              cursor: 'pointer',
+              transition: 'border-color 0.15s, color 0.15s, background-color 0.15s',
             }}
+            onMouseEnter={e => { if (currentRegion !== key) { e.currentTarget.style.borderColor = 'rgba(240,237,232,0.35)'; e.currentTarget.style.color = 'rgba(240,237,232,0.75)' }}}
+            onMouseLeave={e => { if (currentRegion !== key) { e.currentTarget.style.borderColor = 'rgba(240,237,232,0.15)'; e.currentTarget.style.color = 'rgba(240,237,232,0.4)' }}}
           >
             {label}
           </button>
@@ -940,62 +1401,60 @@ export default function MapPage() {
               topoStyleUrl={TOPO_STYLE}
               activeLayers={activeLayers}
               onLayerToggle={setActiveLayers}
+              windEnabled={windEnabled}
+              onWindToggle={setWindEnabled}
+              windLoading={windLoading}
+              windZoomBlocked={windEnabled && mapZoom < WIND_MIN_ZOOM}
+              precipRadarEnabled={precipRadarEnabled}
+              onPrecipRadarToggle={setPrecipRadarEnabled}
+              precipRadarLoading={precipRadarLoading}
+              snowDepthEnabled={snowDepthEnabled}
+              onSnowDepthToggle={setSnowDepthEnabled}
             />
           </motion.div>
 
           {/* Slope angle legend panel */}
-          <div
-            style={{
-              background: 'rgba(15, 25, 40, 0.92)',
-              backdropFilter: 'blur(8px)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '10px',
-              padding: '8px 10px',
-              minWidth: '180px',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-                marginBottom: slopeLegendCollapsed ? 0 : 8,
-                borderBottom: slopeLegendCollapsed ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                paddingBottom: slopeLegendCollapsed ? 0 : 8,
-              }}
-            >
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  color: '#F7FAFC',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                }}
-              >
-                SLOPE ANGLE
+          <div style={{
+            backgroundColor: 'rgba(7,12,16,0.92)',
+            backdropFilter: 'blur(12px)',
+            border: '1px solid rgba(240,237,232,0.08)',
+            padding: '10px 12px',
+            minWidth: 180,
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between', gap: 8,
+              marginBottom: slopeLegendCollapsed ? 0 : 8,
+              borderBottom: slopeLegendCollapsed ? 'none' : '1px solid rgba(240,237,232,0.07)',
+              paddingBottom: slopeLegendCollapsed ? 0 : 8,
+            }}>
+              <span style={{
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontSize: 9, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.18em',
+                color: 'rgba(240,237,232,0.4)',
+              }}>
+                {activeLayers.length > 0 && LAYER_LEGENDS[activeLayers[0]]
+                  ? LAYER_LEGENDS[activeLayers[0]].title
+                  : 'Slope Angle'}
               </span>
               <button
                 type="button"
                 onClick={() => {
                   const next = !slopeLegendCollapsed
                   setSlopeLegendCollapsed(next)
-                  try {
-                    localStorage.setItem('calpow_slope_legend_collapsed', String(next))
-                  } catch (_) {}
+                  try { localStorage.setItem('calpow_slope_legend_collapsed', String(next)) } catch (_) {}
                 }}
                 style={{
-                  padding: 2,
-                  borderRadius: 4,
-                  border: 'none',
+                  padding: '2px 4px', border: 'none',
                   background: 'transparent',
-                  color: '#A0AEC0',
-                  cursor: 'pointer',
-                  fontSize: 10,
+                  color: 'rgba(240,237,232,0.3)', cursor: 'pointer',
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontSize: 9, letterSpacing: '0.1em',
+                  transition: 'color 0.15s',
                 }}
-                className="hover:opacity-80"
-                aria-label={slopeLegendCollapsed ? 'Expand' : 'Collapse'}
+                onMouseEnter={e => e.currentTarget.style.color = 'rgba(240,237,232,0.7)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'rgba(240,237,232,0.3)'}
               >
                 {slopeLegendCollapsed ? '▶' : '▼'}
               </button>
@@ -1004,80 +1463,213 @@ export default function MapPage() {
               <>
                 {activeLayers.length > 0 && activeLayers[0] && LAYER_LEGENDS[activeLayers[0]] ? (
                   LAYER_LEGENDS[activeLayers[0]].stops.map((stop, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        marginBottom: '4px',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: '14px',
-                          height: '14px',
-                          borderRadius: '3px',
-                          backgroundColor: stop.color,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <span style={{ fontSize: '11px', color: '#CBD5E0' }}>{stop.label}</span>
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                      <div style={{
+                        width: 10, height: 10, flexShrink: 0,
+                        backgroundColor: stop.color,
+                      }}/>
+                      <span style={{
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontSize: 10, letterSpacing: '0.06em',
+                        color: 'rgba(240,237,232,0.55)',
+                      }}>{stop.label}</span>
                     </div>
                   ))
                 ) : (
-                  <span style={{ fontSize: '11px', color: '#A0AEC0' }}>
-                    Select a terrain layer above
+                  <span style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    color: 'rgba(240,237,232,0.25)',
+                  }}>
+                    Select a terrain layer
                   </span>
                 )}
               </>
             )}
           </div>
 
-          <AspectElevationRose
-            forecastData={mapRegionForecast}
-            detailedForecast={detailedForecast}
-            region={currentRegion}
-          />
+          {/* Precip radar legend — no zoom gate; show when layer on */}
+          {precipRadarEnabled && (
+            <div style={{
+              backgroundColor: 'rgba(7,12,16,0.92)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(240,237,232,0.08)',
+              padding: '10px 12px',
+              minWidth: 180,
+            }}>
+              <div style={{
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontSize: 9, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.18em',
+                color: 'rgba(240,237,232,0.4)',
+                marginBottom: 4,
+                borderBottom: '1px solid rgba(240,237,232,0.07)',
+                paddingBottom: 6,
+              }}>
+                Precip Radar
+              </div>
+              <p style={{
+                fontFamily: "'Barlow', sans-serif",
+                fontSize: 9, color: 'rgba(240,237,232,0.25)',
+                margin: '0 0 8px', letterSpacing: '0.04em',
+              }}>
+                RainViewer · updates 10 min
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {[
+                  { color: '#00d4ff', label: 'Light' },
+                  { color: '#00ff00', label: 'Mod' },
+                  { color: '#ffff00', label: 'Heavy' },
+                  { color: '#ff6600', label: 'Intense' },
+                  { color: '#ff0000', label: 'Extreme' },
+                ].map(({ color, label }) => (
+                  <div key={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                    <div style={{ width: 18, height: 6, background: color }}/>
+                    <span style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 8, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      color: 'rgba(240,237,232,0.35)',
+                    }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {snowDepthEnabled && (
+            <div style={{
+              backgroundColor: 'rgba(7,12,16,0.92)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(240,237,232,0.08)',
+              padding: '10px 12px',
+              minWidth: 200,
+            }}>
+              <div style={{
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontSize: 9, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.18em',
+                color: 'rgba(240,237,232,0.4)',
+                marginBottom: 4,
+                borderBottom: '1px solid rgba(240,237,232,0.07)',
+                paddingBottom: 6,
+              }}>
+                Snow Depth
+              </div>
+              <p style={{
+                fontFamily: "'Barlow', sans-serif",
+                fontSize: 9, color: 'rgba(240,237,232,0.25)',
+                margin: '0 0 8px', letterSpacing: '0.04em',
+              }}>
+                NOHRSC · updates 4× daily
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
+                {[
+                  { color: '#00ffff', label: 'Trace' },
+                  { color: '#00c8ff', label: '1"' },
+                  { color: '#0096ff', label: '3"' },
+                  { color: '#0050ff', label: '6"' },
+                  { color: '#00c800', label: '12"' },
+                  { color: '#c8ff00', label: '18"' },
+                  { color: '#ffff00', label: '24"' },
+                  { color: '#ffa000', label: '36"' },
+                  { color: '#ff0000', label: '48"' },
+                  { color: '#ff00ff', label: '60"+' },
+                ].map(({ color, label }) => (
+                  <div key={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                    <div style={{ width: 14, height: 6, background: color }}/>
+                    <span style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 8, letterSpacing: '0.04em',
+                      color: 'rgba(240,237,232,0.35)',
+                    }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Avalanche danger for current region */}
       {mapReady && (mapRegionForecast || currentRegion) && (
         <div
-          className="absolute left-4 z-10 mt-2 rounded-lg border px-3 py-2 shadow-lg flex items-center gap-2 flex-wrap"
           style={{
-            top: 56,
-            background: 'rgba(30, 45, 61, 0.55)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            position: 'absolute',
+            top: 56, left: 16,
+            minWidth: 160,
+            backgroundColor: 'rgba(7,12,16,0.88)',
+            backdropFilter: 'blur(12px)',
+            border: '1px solid rgba(240,237,232,0.1)',
+            padding: '8px 12px',
+            zIndex: 10,
           }}
         >
-          <span className="text-xs text-text-secondary">Avalanche danger</span>
+          <div style={{
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase',
+            color: 'rgba(240,237,232,0.3)',
+            marginBottom: 5,
+          }}>
+            Avalanche Danger
+          </div>
           {mapRegionForecast ? (
-            <>
-              <span
-                className="inline-block px-2 py-0.5 rounded text-xs font-semibold text-white"
-                style={{ backgroundColor: mapRegionForecast.color }}
-              >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{
+                display: 'inline-block',
+                padding: '2px 8px',
+                backgroundColor: mapRegionForecast.color,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: '#fff',
+              }}>
                 {mapRegionForecast.danger_level != null
-                  ? `${mapRegionForecast.danger_level} - ${mapRegionForecast.danger_label}`
+                  ? `${mapRegionForecast.danger_level} · ${mapRegionForecast.danger_label}`
                   : mapRegionForecast.danger_label}
               </span>
-              <span className="text-[10px] text-emerald-400 font-medium">Live</span>
+              <span style={{
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+                color: '#4ade80',
+              }}>Live</span>
               <a
                 href={mapRegionForecast.forecast_url || FALLBACK_URLS[currentRegion]}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-medium ml-1"
-                style={{ color: '#3B8BEB' }}
+                target="_blank" rel="noopener noreferrer"
+                style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+                  color: 'rgba(240,237,232,0.4)',
+                  textDecoration: 'none',
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = '#F0EDE8'}
+                onMouseLeave={e => e.currentTarget.style.color = 'rgba(240,237,232,0.4)'}
               >
-                Full forecast ↗
+                Full Forecast ↗
               </a>
-            </>
+            </div>
           ) : (
-            <span className="text-xs text-text-muted">Loading…</span>
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: 'rgba(240,237,232,0.3)' }}>
+              Loading…
+            </span>
           )}
+        </div>
+      )}
+
+      {/* Aspect / elevation rose — below avalanche danger bar */}
+      {mapReady && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 16,
+            top: 116,
+            zIndex: 10,
+          }}
+        >
+          <AspectElevationRose
+            forecastData={mapRegionForecast}
+            detailedForecast={detailedForecast}
+            region={currentRegion}
+          />
         </div>
       )}
 
@@ -1152,229 +1744,269 @@ export default function MapPage() {
         if (popupX + POPUP_WIDTH > mapWidth - MARGIN) popupX = mapWidth - POPUP_WIDTH - MARGIN
         if (popupY < MARGIN) popupY = terrainPopup.y + 24
         if (popupY + POPUP_HEIGHT > mapHeight - MARGIN) popupY = mapHeight - POPUP_HEIGHT - MARGIN
+
         return (
-        <div
-          style={{
-            position: 'absolute',
-            left: popupX,
-            top: popupY,
-            transform: 'none',
-            zIndex: 20,
-            pointerEvents: 'auto',
-            background: 'rgba(15,25,35,0.95)',
+          <div style={{
+            position: 'absolute', left: popupX, top: popupY,
+            zIndex: 20, pointerEvents: 'auto',
+            backgroundColor: 'rgba(7,12,16,0.97)',
             backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(59,139,235,0.4)',
-            borderRadius: '12px',
-            padding: '16px',
-            minWidth: '220px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-          }}
-          className="relative"
-        >
-          {/* Triangle pointer */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '-8px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 0,
-              height: 0,
-              borderLeft: '8px solid transparent',
-              borderRight: '8px solid transparent',
-              borderTop: '8px solid rgba(15,25,35,0.95)',
-            }}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '-9px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 0,
-              height: 0,
-              borderLeft: '9px solid transparent',
-              borderRight: '9px solid transparent',
-              borderTop: '9px solid rgba(59,139,235,0.4)',
-            }}
-          />
+            border: '1px solid rgba(240,237,232,0.12)',
+            padding: '14px',
+            minWidth: 210,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          }}>
+            {/* Triangle pointer */}
+            <div style={{
+              position: 'absolute', bottom: -7, left: '50%', transform: 'translateX(-50%)',
+              width: 0, height: 0,
+              borderLeft: '7px solid transparent', borderRight: '7px solid transparent',
+              borderTop: '7px solid rgba(7,12,16,0.97)',
+            }}/>
+            <div style={{
+              position: 'absolute', bottom: -8, left: '50%', transform: 'translateX(-50%)',
+              width: 0, height: 0,
+              borderLeft: '8px solid transparent', borderRight: '8px solid transparent',
+              borderTop: '8px solid rgba(240,237,232,0.12)',
+            }}/>
 
-          {terrainPopup.loading ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-6">
-              <div className="w-8 h-8 border-2 border-white border-t-[#3B8BEB] rounded-full animate-spin" />
-              <span className="text-sm text-text-secondary">Analyzing terrain...</span>
-            </div>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => setTerrainPopup(null)}
-                className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded text-text-secondary hover:text-white hover:bg-white/10 text-lg leading-none"
-                aria-label="Close"
-              >
-                ×
-              </button>
-              <div className="text-[11px] font-medium uppercase tracking-wider pr-6" style={{ color: '#3B8BEB' }}>
-                Terrain Analysis
+            {terrainPopup.loading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '20px 0' }}>
+                <div style={{
+                  width: 20, height: 20,
+                  border: '1.5px solid rgba(240,237,232,0.15)',
+                  borderTopColor: '#F0EDE8',
+                  borderRadius: '50%',
+                  animation: 'spin 0.7s linear infinite',
+                }}/>
+                <span style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+                  color: 'rgba(240,237,232,0.35)',
+                }}>Analyzing terrain…</span>
               </div>
-              <div className="text-[11px] text-text-secondary mt-1">
-                {terrainPopup.lat.toFixed(4)}, {terrainPopup.lng.toFixed(4)}
-              </div>
-              <div className="border-t border-white/10 my-3" />
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setTerrainPopup(null)}
+                  style={{
+                    position: 'absolute', top: 8, right: 8,
+                    width: 20, height: 20,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: 'none', background: 'transparent',
+                    color: 'rgba(240,237,232,0.3)', cursor: 'pointer', fontSize: 14,
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = '#F0EDE8'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'rgba(240,237,232,0.3)'}
+                >×</button>
 
-              {/* Slope */}
-              <div className="mb-3">
-                <div className="text-xs text-text-secondary flex items-center gap-1.5">
-                  <span>⛰️</span> Slope Angle
+                <div style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase',
+                  color: 'rgba(240,237,232,0.35)',
+                  marginBottom: 2,
+                }}>Terrain Analysis</div>
+                <div style={{
+                  fontFamily: "'Barlow', sans-serif",
+                  fontSize: 10, color: 'rgba(240,237,232,0.25)',
+                  marginBottom: 10,
+                }}>
+                  {terrainPopup.lat.toFixed(4)}, {terrainPopup.lng.toFixed(4)}
                 </div>
-                <div className="text-sm font-semibold mt-0.5" style={{ color: slopeColor(terrainPopup.slopeAngle ?? 0) }}>
-                  {(terrainPopup.slopeAngle ?? 0).toFixed(1)}°
-                </div>
-                <div className="text-[11px] text-text-secondary mt-0.5">
-                  {slopeSubLabel(terrainPopup.slopeAngle ?? 0)}
-                </div>
-              </div>
+                <div style={{ borderTop: '1px solid rgba(240,237,232,0.07)', marginBottom: 10 }}/>
 
-              {/* Aspect */}
-              <div className="mb-3">
-                <div className="text-xs text-text-secondary flex items-center gap-1.5">
-                  <span>🧭</span> Aspect: <span className="text-white font-medium">{terrainPopup.aspect ?? '—'}</span>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase',
+                    color: 'rgba(240,237,232,0.3)', marginBottom: 3,
+                  }}>Slope Angle</div>
+                  <div style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 18, fontWeight: 700,
+                    color: slopeColor(terrainPopup.slopeAngle ?? 0),
+                    lineHeight: 1,
+                  }}>
+                    {(terrainPopup.slopeAngle ?? 0).toFixed(1)}°
+                  </div>
+                  <div style={{
+                    fontFamily: "'Barlow', sans-serif",
+                    fontSize: 10, color: 'rgba(240,237,232,0.3)', marginTop: 2,
+                  }}>
+                    {slopeSubLabel(terrainPopup.slopeAngle ?? 0)}
+                  </div>
                 </div>
-                <div className="text-[11px] text-text-secondary mt-0.5">
-                  North-facing slopes hold weak layers longest
-                </div>
-              </div>
 
-              {/* Wind */}
-              <div className="mb-3">
-                <div className="text-xs text-text-secondary flex items-center gap-1.5">
-                  <span>💨</span> Wind
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase',
+                    color: 'rgba(240,237,232,0.3)', marginBottom: 3,
+                  }}>Aspect</div>
+                  <div style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 14, fontWeight: 700, color: '#F0EDE8',
+                  }}>
+                    {terrainPopup.aspect ?? '—'}
+                  </div>
+                  <div style={{ fontFamily: "'Barlow', sans-serif", fontSize: 10, color: 'rgba(240,237,232,0.3)', marginTop: 2 }}>
+                    N-facing slopes hold weak layers longest
+                  </div>
                 </div>
-                <div className="text-sm text-white mt-0.5">
-                  {terrainPopup.wind
-                    ? `${terrainPopup.wind.speed} mph from ${terrainPopup.wind.label}`
-                    : 'Unavailable'}
-                </div>
-                {terrainPopup.wind?.speed > 25 && (
-                  <div className="text-[11px] text-orange-400 mt-0.5">⚠️ Wind loading likely</div>
-                )}
-              </div>
 
-              {/* Temperature */}
-              <div>
-                <div className="text-xs text-text-secondary flex items-center gap-1.5">
-                  <span>🌡️</span> Temperature
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase',
+                    color: 'rgba(240,237,232,0.3)', marginBottom: 3,
+                  }}>Wind</div>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 13, color: '#F0EDE8' }}>
+                    {terrainPopup.wind
+                      ? `${terrainPopup.wind.speed} mph · ${terrainPopup.wind.label}`
+                      : 'Unavailable'}
+                  </div>
+                  {terrainPopup.wind?.speed > 25 && (
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#fb923c', marginTop: 2 }}>
+                      Wind loading likely
+                    </div>
+                  )}
                 </div>
-                <div className="text-sm font-semibold mt-0.5" style={{ color: tempColor(terrainPopup.temp) }}>
-                  {terrainPopup.temp != null ? `${terrainPopup.temp}°F` : 'Unavailable'}
+
+                <div>
+                  <div style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase',
+                    color: 'rgba(240,237,232,0.3)', marginBottom: 3,
+                  }}>Temperature</div>
+                  <div style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 14, fontWeight: 700,
+                    color: tempColor(terrainPopup.temp),
+                  }}>
+                    {terrainPopup.temp != null ? `${terrainPopup.temp}°F` : 'Unavailable'}
+                  </div>
+                  {terrainPopup.temp != null && terrainPopup.temp > 45 && (
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#fb923c', marginTop: 2 }}>
+                      Wet avalanche risk
+                    </div>
+                  )}
                 </div>
-                {terrainPopup.temp != null && terrainPopup.temp > 45 && (
-                  <div className="text-[11px] text-orange-400 mt-0.5">⚠️ Wet avalanche risk</div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
         )
       })()}
 
       {/* Danger segment popup */}
-      {selectedDangerSeg && dangerPopupPos && selectedDangerSeg.severity !== 'descent' && (() => {
+      {selectedDangerSeg && selectedDangerSeg.severity !== 'descent' && (() => {
         const mapEl = mapContainerRef.current
         const mapWidth = mapEl?.offsetWidth ?? window.innerWidth
-        const mapHeight = mapEl?.offsetHeight ?? window.innerHeight
-        const DANGER_POPUP_WIDTH = 220
-        const DANGER_POPUP_HEIGHT = 180
-        let popupX = dangerPopupPos.x - DANGER_POPUP_WIDTH / 2
-        let popupY = dangerPopupPos.y - DANGER_POPUP_HEIGHT - 16
-        if (popupX < MARGIN) popupX = MARGIN
-        if (popupX + DANGER_POPUP_WIDTH > mapWidth - MARGIN) popupX = mapWidth - DANGER_POPUP_WIDTH - MARGIN
-        if (popupY < MARGIN) popupY = dangerPopupPos.y + 24
-        if (popupY + DANGER_POPUP_HEIGHT > mapHeight - MARGIN) popupY = mapHeight - DANGER_POPUP_HEIGHT - MARGIN
+        const popupX = (mapWidth / 2) + 160
+        const popupY = 60
         const severityLabel = {
-          caution: '⚠️ Caution',
-          dangerous: '🔴 Dangerous',
-          extreme: '🚨 Extreme',
+          caution: 'Caution',
+          dangerous: 'Dangerous',
+          extreme: 'Extreme',
         }[selectedDangerSeg.severity] ?? selectedDangerSeg.severity
-        const footerText =
-          selectedDangerSeg.severity === 'caution'
-            ? 'Avalanche terrain. Extra caution required.'
-            : selectedDangerSeg.severity === 'dangerous'
-              ? 'High consequence terrain. Consider alternatives.'
-              : 'Extreme terrain. Expert only. High rescue difficulty.'
+        const footerText = {
+          caution: 'Avalanche terrain. Extra caution required.',
+          dangerous: 'High consequence terrain. Consider alternatives.',
+          extreme: 'Extreme terrain. Expert only.',
+        }[selectedDangerSeg.severity] ?? ''
+
         return (
-          <div
-            style={{
-              position: 'absolute',
-              left: popupX,
-              top: popupY,
-              zIndex: 20,
-              pointerEvents: 'auto',
-              background: '#1E2D3D',
-              color: '#F7FAFC',
-              padding: 12,
-              borderRadius: 8,
-              maxWidth: DANGER_POPUP_WIDTH,
-              fontSize: 13,
-              lineHeight: 1.5,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-              border: `1px solid ${selectedDangerSeg.color}40`,
-            }}
-            className="relative"
-          >
+          <div style={{
+            position: 'absolute', left: popupX, top: popupY,
+            zIndex: 20, pointerEvents: 'auto',
+            backgroundColor: 'rgba(7,12,16,0.97)',
+            border: `1px solid ${selectedDangerSeg.color}40`,
+            padding: '12px 14px',
+            maxWidth: 220,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          }}>
             <button
               type="button"
               onClick={() => setSelectedDangerSeg(null)}
-              className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded text-text-secondary hover:text-white hover:bg-white/10 text-lg leading-none"
-              aria-label="Close"
-            >
-              ×
-            </button>
-            <div style={{ fontWeight: 700, marginBottom: 6, color: selectedDangerSeg.color, paddingRight: 24 }}>
+              style={{
+                position: 'absolute', top: 6, right: 8,
+                width: 18, height: 18,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: 'none', background: 'transparent',
+                color: 'rgba(240,237,232,0.3)', cursor: 'pointer', fontSize: 14,
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = '#F0EDE8'}
+              onMouseLeave={e => e.currentTarget.style.color = 'rgba(240,237,232,0.3)'}
+            >×</button>
+
+            <div style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 13, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: selectedDangerSeg.color,
+              marginBottom: 6, paddingRight: 20,
+            }}>
               {severityLabel}
             </div>
-            <div style={{ marginBottom: 4 }}>
+            <div style={{
+              fontFamily: "'Barlow', sans-serif",
+              fontSize: 11, color: 'rgba(240,237,232,0.6)',
+              lineHeight: 1.5, marginBottom: 6,
+            }}>
               {selectedDangerSeg.reasons.join(' · ')}
             </div>
-            <div className="text-text-secondary text-[11px] mt-1.5">
-              Slope: {selectedDangerSeg.slope.toFixed(1)}° · Aspect: {selectedDangerSeg.aspect}
+            <div style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase',
+              color: 'rgba(240,237,232,0.3)',
+              marginBottom: 4,
+            }}>
+              {selectedDangerSeg.slope.toFixed(1)}° · {selectedDangerSeg.aspect}
             </div>
-            <div className="text-[11px] mt-1" style={{ color: '#718096' }}>
+            <div style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'rgba(240,237,232,0.2)',
+            }}>
               {footerText}
             </div>
           </div>
         )
       })()}
 
-      {/* Dark theme overrides for Mapbox controls */}
+      {/* Mapbox control overrides + Barlow + spin */}
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@400;600;700;800&display=swap');
+
         .mapboxgl-ctrl-group {
-          background-color: #1E2D3D !important;
-          border: 1px solid #2D3748 !important;
-          border-radius: 8px !important;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+          background-color: rgba(7,12,16,0.92) !important;
+          border: 1px solid rgba(240,237,232,0.1) !important;
+          border-radius: 0 !important;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
         }
         .mapboxgl-ctrl-group button {
-          background-color: #1E2D3D !important;
-          color: #F7FAFC !important;
-          width: 36px !important;
-          height: 36px !important;
+          background-color: transparent !important;
+          color: #F0EDE8 !important;
+          width: 32px !important;
+          height: 32px !important;
+          border-radius: 0 !important;
+          transition: background-color 0.15s !important;
         }
         .mapboxgl-ctrl-group button:hover {
-          background-color: #243447 !important;
+          background-color: rgba(240,237,232,0.08) !important;
         }
         .mapboxgl-ctrl-group button + button {
-          border-top: 1px solid #2D3748 !important;
-        }
-        .mapboxgl-ctrl-group button svg path,
-        .mapboxgl-ctrl-group button svg {
-          fill: #ffffff !important;
-          stroke: #ffffff !important;
+          border-top: 1px solid rgba(240,237,232,0.07) !important;
         }
         .mapboxgl-ctrl-zoom-in .mapboxgl-ctrl-icon,
         .mapboxgl-ctrl-zoom-out .mapboxgl-ctrl-icon,
         .mapboxgl-ctrl-compass .mapboxgl-ctrl-icon {
           filter: invert(1) !important;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

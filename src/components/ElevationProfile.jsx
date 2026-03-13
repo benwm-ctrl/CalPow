@@ -8,9 +8,36 @@ import {
   ResponsiveContainer,
   ReferenceArea,
 } from 'recharts'
-import { motion } from 'framer-motion'
 import { useRouteStore } from '../store/routeStore'
 
+// ── constants ─────────────────────────────────────────────────────────────────
+const BELOW_TREELINE = 2400
+const NEAR_TREELINE  = 2900
+
+const LABEL = {
+  fontFamily: "'Barlow Condensed', sans-serif",
+  textTransform: 'uppercase',
+  letterSpacing: '0.14em',
+}
+
+const DANGER_LABELS = ['', 'Low', 'Moderate', 'Considerable', 'High', 'Extreme']
+
+// Solid colors matching the avalanche standard palette — used for reference bands (low opacity)
+// and for the legend chips (higher opacity border)
+function dangerFill(level) {
+  if (level >= 4) return 'rgba(239,68,68,0.10)'    // High/Extreme — red
+  if (level >= 3) return 'rgba(251,146,60,0.10)'   // Considerable — orange
+  if (level >= 2) return 'rgba(250,204,21,0.10)'   // Moderate     — yellow
+  return           'rgba(74,222,128,0.07)'          // Low          — green
+}
+function dangerBorder(level) {
+  if (level >= 4) return '#ef4444'
+  if (level >= 3) return '#fb923c'
+  if (level >= 2) return '#facc15'
+  return           '#4ade80'
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371
   const dLat = ((lat2 - lat1) * Math.PI) / 180
@@ -20,45 +47,38 @@ function haversineKm(lat1, lon1, lat2, lon2) {
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return R * c
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
 function buildProfileData(waypoints) {
-  if (!waypoints || waypoints.length < 2) return { data: [], distanceKm: 0, elevationGainM: 0, minElevationM: 0, maxElevationM: 0 }
+  if (!waypoints || waypoints.length < 2)
+    return { data: [], distanceKm: 0, elevationGainM: 0, minElevationM: 0, maxElevationM: 0 }
+
   let distanceKm = 0
   let elevationGainM = 0
-  let minElevationM = typeof waypoints[0][2] === 'number' && !Number.isNaN(waypoints[0][2]) ? waypoints[0][2] : 0
-  let maxElevationM = minElevationM
+  const first = typeof waypoints[0][2] === 'number' && !Number.isNaN(waypoints[0][2]) ? waypoints[0][2] : 0
+  let minElevationM = first
+  let maxElevationM = first
+
   const data = waypoints.map((wp, i) => {
-    const lng = wp[0]
-    const lat = wp[1]
-    const ele = wp[2]
-    const elev = typeof ele === 'number' && !Number.isNaN(ele) ? ele : 0
+    const elev = typeof wp[2] === 'number' && !Number.isNaN(wp[2]) ? wp[2] : 0
     if (i > 0) {
-      const prevLng = waypoints[i - 1][0]
-      const prevLat = waypoints[i - 1][1]
-      const prevEle = waypoints[i - 1][2]
-      const prevElev = typeof prevEle === 'number' && !Number.isNaN(prevEle) ? prevEle : 0
-      distanceKm += haversineKm(prevLat, prevLng, lat, lng)
+      const prev = waypoints[i - 1]
+      const prevElev = typeof prev[2] === 'number' && !Number.isNaN(prev[2]) ? prev[2] : 0
+      distanceKm += haversineKm(prev[1], prev[0], wp[1], wp[0])
       const delta = elev - prevElev
       if (delta > 0) elevationGainM += delta
-      if (elev > maxElevationM) maxElevationM = elev
-      if (elev < minElevationM) minElevationM = elev
-    } else {
-      if (elev > maxElevationM) maxElevationM = elev
-      if (elev < minElevationM) minElevationM = elev
     }
+    if (elev > maxElevationM) maxElevationM = elev
+    if (elev < minElevationM) minElevationM = elev
     return { distanceKm, elevation: elev }
   })
+
   return { data, distanceKm, elevationGainM, minElevationM, maxElevationM }
 }
 
-/** Estimated time: 300 m elevation per hour + 4 km/hr on flat (Naismith-style) */
 function estimateHours(distanceKm, elevationGainM) {
-  const hoursFromDist = distanceKm / 4
-  const hoursFromElev = elevationGainM / 300
-  return hoursFromDist + hoursFromElev
+  return distanceKm / 4 + elevationGainM / 300
 }
 
 function formatDuration(hours) {
@@ -69,192 +89,216 @@ function formatDuration(hours) {
   return `${h}h ${m}m`
 }
 
-const BELOW_TREELINE = 2400 // meters
-const NEAR_TREELINE = 2900 // meters
-
-function dangerColor(level, opacity = 0.15) {
-  if (level >= 4) return `rgba(255, 0, 0, ${opacity})` // High/Extreme
-  if (level >= 3) return `rgba(255, 140, 0, ${opacity})` // Considerable
-  if (level >= 2) return `rgba(255, 215, 0, ${opacity})` // Moderate
-  return `rgba(40, 167, 69, ${opacity})` // Low
+// ── custom tooltip ────────────────────────────────────────────────────────────
+function CustomTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload
+  if (!d) return null
+  return (
+    <div style={{
+      backgroundColor: 'rgba(7,12,16,0.97)',
+      border: '1px solid rgba(240,237,232,0.15)',
+      padding: '6px 10px',
+    }}>
+      <div style={{
+        fontFamily: "'Barlow Condensed', sans-serif",
+        fontSize: 15, fontWeight: 800,
+        color: '#F0EDE8', lineHeight: 1,
+      }}>
+        {typeof d.elevation === 'number' ? d.elevation.toFixed(0) : '—'} m
+      </div>
+      <div style={{ ...LABEL, fontSize: 8, color: 'rgba(240,237,232,0.3)', marginTop: 3 }}>
+        {typeof d.distanceKm === 'number' ? d.distanceKm.toFixed(2) : '—'} km
+      </div>
+    </div>
+  )
 }
 
+// ── main ──────────────────────────────────────────────────────────────────────
 export default function ElevationProfile() {
   const waypoints = useRouteStore((s) => s.waypoints)
-  const forecast = useRouteStore((s) => s.forecast)
+  const forecast  = useRouteStore((s) => s.forecast)
 
   if (!waypoints || waypoints.length < 2) return null
 
   const { data, distanceKm, elevationGainM, minElevationM, maxElevationM } = buildProfileData(waypoints)
-  if (!data || data.length === 0) return null
+  if (!data?.length) return null
 
-  const baseDanger = forecast?.danger_level ?? 1
-  // Above treeline is typically 1 level higher than base; below treeline typically 1 level lower
+  const baseDanger  = forecast?.danger_level ?? 1
   const belowDanger = forecast?.danger_below_treeline ?? Math.max(1, baseDanger - 1)
-  const nearDanger = forecast?.danger_near_treeline ?? baseDanger
+  const nearDanger  = forecast?.danger_near_treeline  ?? baseDanger
   const aboveDanger = forecast?.danger_above_treeline ?? Math.min(5, baseDanger + 1)
 
   const estimatedHours = estimateHours(distanceKm, elevationGainM)
   const yMin = Math.floor(minElevationM - 20)
-  const yMax = Math.ceil(maxElevationM + 20)
+  const yMax = Math.ceil(maxElevationM  + 20)
+
+  const stats = [
+    { label: 'Distance',  value: `${distanceKm.toFixed(2)} km` },
+    { label: 'Gain',      value: `${elevationGainM.toFixed(0)} m` },
+    { label: 'Est. Time', value: formatDuration(estimatedHours) },
+    { label: 'Max Elev',  value: `${maxElevationM.toFixed(0)} m` },
+  ]
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 40 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: 'easeOut' }}
+    <div
       style={{
         position: 'absolute',
         bottom: 0,
-        left: '260px',
-        right: '280px',
+        left: '326px',
+        right: '236px',
         width: 'auto',
         zIndex: 5,
         height: '180px',
-        backgroundColor: 'rgba(30, 45, 61, 0.55)',
-        backdropFilter: 'blur(8px)',
-        borderTop: '1px solid rgba(255,255,255,0.08)',
-        padding: '8px 12px 4px 12px',
+        backgroundColor: 'rgba(7,12,16,0.97)',
+        backdropFilter: 'blur(12px)',
+        borderTop: '1px solid rgba(240,237,232,0.09)',
       }}
     >
-      {/* Stats row — 20px */}
-      <div className="flex flex-wrap gap-3" style={{ height: '20px', minHeight: '20px' }}>
-        <span className="text-xs font-medium text-text-secondary">
-          Distance: <strong className="text-text-primary">{distanceKm.toFixed(2)} km</strong>
-        </span>
-        <span className="text-xs font-medium text-text-secondary">
-          Gain: <strong className="text-text-primary">{elevationGainM.toFixed(1)} m</strong>
-        </span>
-        <span className="text-xs font-medium text-text-secondary">
-          Est. time: <strong className="text-text-primary">{formatDuration(estimatedHours)}</strong>
-        </span>
-        <span className="text-xs font-medium text-text-secondary">
-          Max elev: <strong className="text-text-primary">{maxElevationM.toFixed(1)} m</strong>
-        </span>
+      {/* ── Top strip: stats + legend ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        borderBottom: '1px solid rgba(240,237,232,0.07)',
+        height: 36,
+      }}>
+        {/* Stats cells */}
+        {stats.map(({ label, value }) => (
+          <div key={label} style={{
+            display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            padding: '0 14px',
+            borderRight: '1px solid rgba(240,237,232,0.07)',
+          }}>
+            <div style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 13, fontWeight: 800,
+              color: '#F0EDE8', lineHeight: 1,
+            }}>
+              {value}
+            </div>
+            <div style={{ ...LABEL, fontSize: 7, color: 'rgba(240,237,232,0.3)', marginTop: 2 }}>
+              {label}
+            </div>
+          </div>
+        ))}
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Elevation band legend chips — only if forecast present */}
+        {forecast && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '0 12px',
+            borderLeft: '1px solid rgba(240,237,232,0.07)',
+          }}>
+            <span style={{ ...LABEL, fontSize: 7, color: 'rgba(240,237,232,0.25)', marginRight: 4 }}>
+              Avy danger
+            </span>
+            {[
+              { label: 'Below treeline', level: belowDanger },
+              { label: 'Near treeline',  level: nearDanger },
+              { label: 'Above treeline', level: aboveDanger },
+            ].map(({ label, level }) => (
+              <div key={label} style={{
+                ...LABEL, fontSize: 8, fontWeight: 700,
+                padding: '2px 8px',
+                color: dangerBorder(level),
+                border: `1px solid ${dangerBorder(level)}50`,
+                backgroundColor: dangerFill(level),
+                whiteSpace: 'nowrap',
+              }}>
+                {label.replace(' treeline', '')} · {DANGER_LABELS[level] ?? level}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Legend row — 20px */}
-      {forecast && (
-        <div
-          style={{
-            display: 'flex',
-            gap: '12px',
-            fontSize: '10px',
-            color: '#A0AEC0',
-            height: '20px',
-            minHeight: '20px',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-          }}
-        >
-          <span style={{ color: '#A0AEC0' }}>Avy danger by elevation:</span>
-          <span
-            style={{
-              padding: '1px 6px',
-              borderRadius: '3px',
-              backgroundColor: dangerColor(belowDanger, 0.6),
-              color: '#fff',
-            }}
-          >
-            Below treeline: {['', 'Low', 'Moderate', 'Considerable', 'High', 'Extreme'][belowDanger] ?? belowDanger}
-          </span>
-          <span
-            style={{
-              padding: '1px 6px',
-              borderRadius: '3px',
-              backgroundColor: dangerColor(nearDanger, 0.6),
-              color: '#fff',
-            }}
-          >
-            Near treeline: {['', 'Low', 'Moderate', 'Considerable', 'High', 'Extreme'][nearDanger] ?? nearDanger}
-          </span>
-          <span
-            style={{
-              padding: '1px 6px',
-              borderRadius: '3px',
-              backgroundColor: dangerColor(aboveDanger, 0.6),
-              color: '#fff',
-            }}
-          >
-            Above treeline: {['', 'Low', 'Moderate', 'Considerable', 'High', 'Extreme'][aboveDanger] ?? aboveDanger}
-          </span>
-        </div>
-      )}
+      {/* ── Chart ── */}
+      <div style={{ width: '100%', height: 'calc(180px - 36px)' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id="elevGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#F0EDE8" stopOpacity={0.12} />
+                <stop offset="95%" stopColor="#F0EDE8" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
 
-      {/* Chart — remaining height (100px) */}
-      <div style={{ width: '100%', height: '100px' }}>
-        <ResponsiveContainer width="100%" height={100}>
-          <AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="elevationGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3B8BEB" stopOpacity={0.8} />
-                  <stop offset="100%" stopColor="#3B8BEB" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="2 2" stroke="#2D3748" opacity={0.5} />
-              <XAxis
-                dataKey="distanceKm"
-                type="number"
-                domain={['dataMin', 'dataMax']}
-                tick={{ fill: '#A0AEC0', fontSize: 10 }}
-                tickFormatter={(v) => `${typeof v === 'number' ? v.toFixed(1) : v} km`}
-              />
-              <YAxis
-                dataKey="elevation"
-                type="number"
-                domain={[yMin, yMax]}
-                tick={{ fill: '#A0AEC0', fontSize: 10 }}
-                tickFormatter={(v) => `${typeof v === 'number' ? v.toFixed(1) : v} m`}
-                width={36}
-              />
-              {/* Below treeline band */}
+            <CartesianGrid
+              strokeDasharray="0"
+              stroke="rgba(240,237,232,0.05)"
+              horizontal vertical={false}
+            />
+
+            {/* Below treeline band */}
+            <ReferenceArea
+              y1={yMin}
+              y2={Math.min(BELOW_TREELINE, yMax)}
+              fill={dangerFill(belowDanger)}
+              fillOpacity={1}
+              strokeOpacity={0}
+            />
+            {/* Near treeline band */}
+            {yMax > BELOW_TREELINE && (
               <ReferenceArea
-                y1={yMin}
-                y2={Math.min(BELOW_TREELINE, yMax)}
-                fill={dangerColor(belowDanger)}
+                y1={Math.max(BELOW_TREELINE, yMin)}
+                y2={Math.min(NEAR_TREELINE, yMax)}
+                fill={dangerFill(nearDanger)}
                 fillOpacity={1}
                 strokeOpacity={0}
               />
-              {/* Near treeline band */}
-              {yMax > BELOW_TREELINE && (
-                <ReferenceArea
-                  y1={Math.max(BELOW_TREELINE, yMin)}
-                  y2={Math.min(NEAR_TREELINE, yMax)}
-                  fill={dangerColor(nearDanger)}
-                  fillOpacity={1}
-                  strokeOpacity={0}
-                />
-              )}
-              {/* Above treeline band */}
-              {yMax > NEAR_TREELINE && (
-                <ReferenceArea
-                  y1={Math.max(NEAR_TREELINE, yMin)}
-                  y2={yMax}
-                  fill={dangerColor(aboveDanger)}
-                  fillOpacity={1}
-                  strokeOpacity={0}
-                />
-              )}
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1E2D3D',
-                  border: '1px solid #2D3748',
-                  borderRadius: 8,
-                }}
-                labelStyle={{ color: '#F7FAFC' }}
-                formatter={(value) => [typeof value === 'number' ? value.toFixed(1) + ' m' : String(value ?? ''), 'Elevation']}
-                labelFormatter={(label) => `Distance: ${label} km`}
+            )}
+            {/* Above treeline band */}
+            {yMax > NEAR_TREELINE && (
+              <ReferenceArea
+                y1={Math.max(NEAR_TREELINE, yMin)}
+                y2={yMax}
+                fill={dangerFill(aboveDanger)}
+                fillOpacity={1}
+                strokeOpacity={0}
               />
-              <Area
-                type="linear"
-                dataKey="elevation"
-                stroke="#3B8BEB"
-                strokeWidth={2}
-                fill="url(#elevationGradient)"
-              />
-            </AreaChart>
+            )}
+
+            <XAxis
+              dataKey="distanceKm"
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              tick={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9, fill: 'rgba(240,237,232,0.25)', letterSpacing: '0.06em' }}
+              tickFormatter={(v) => `${typeof v === 'number' ? v.toFixed(1) : v}`}
+              axisLine={{ stroke: 'rgba(240,237,232,0.07)' }}
+              tickLine={false}
+            />
+            <YAxis
+              dataKey="elevation"
+              type="number"
+              domain={[yMin, yMax]}
+              tick={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 9, fill: 'rgba(240,237,232,0.25)', letterSpacing: '0.04em' }}
+              tickFormatter={(v) => `${typeof v === 'number' ? Math.round(v) : v}`}
+              axisLine={false}
+              tickLine={false}
+              width={42}
+            />
+
+            <Tooltip
+              content={<CustomTooltip />}
+              cursor={{ stroke: 'rgba(240,237,232,0.18)', strokeWidth: 1, strokeDasharray: '3 3' }}
+            />
+
+            <Area
+              type="linear"
+              dataKey="elevation"
+              stroke="#F0EDE8"
+              strokeWidth={1.5}
+              fill="url(#elevGrad)"
+              dot={false}
+              activeDot={{ r: 3, fill: '#F0EDE8', stroke: 'none' }}
+              isAnimationActive={false}
+            />
+          </AreaChart>
         </ResponsiveContainer>
       </div>
-    </motion.div>
+    </div>
   )
 }

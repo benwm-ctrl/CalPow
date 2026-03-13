@@ -53,19 +53,75 @@ EASTERN SIERRA:
 - Convict Lake: Laurel Mountain, Bloody Mountain, Red Slate Mountain
 - White Mountains: Boundary Peak area`
 
-function buildSystemContent(forecastContext) {
-  if (!forecastContext || typeof forecastContext !== 'string' || !forecastContext.trim()) {
-    return MIKE_SYSTEM_PROMPT
-  }
-  return `${MIKE_SYSTEM_PROMPT}
+export async function fetchNOAAWeather(lat, lng) {
+  try {
+    const headers = { Accept: 'application/json', 'User-Agent': 'CalPow/1.0 (backcountry ski app)' }
+    const pointRes = await fetch(`https://api.weather.gov/points/${lat},${lng}`, { headers })
+    const pointData = await pointRes.json()
+    const forecastUrl = pointData.properties?.forecast
+    const hourlyUrl = pointData.properties?.forecastHourly
+    if (!forecastUrl || !hourlyUrl) return null
 
-Current forecast context (use when relevant; reference this for today's conditions):
-${forecastContext}`
+    const [dailyRes, hourlyRes] = await Promise.all([
+      fetch(forecastUrl, { headers }),
+      fetch(hourlyUrl, { headers }),
+    ])
+    const daily = await dailyRes.json()
+    const hourly = await hourlyRes.json()
+
+    const current = hourly.properties?.periods?.[0]
+    const dailyPeriods = daily.properties?.periods ?? []
+    const tonight = dailyPeriods.find((p) => !p.isDaytime)
+    const tomorrow = dailyPeriods.find((p) => p.isDaytime && p.number > 1)
+
+    if (!current) return null
+
+    return {
+      current: {
+        temp: current.temperature,
+        unit: current.temperatureUnit ?? 'F',
+        wind: current.windSpeed ?? 'N/A',
+        windDir: current.windDirection ?? 'N/A',
+        shortForecast: current.shortForecast ?? 'N/A',
+      },
+      tonight: tonight?.detailedForecast ?? null,
+      tomorrow: tomorrow?.detailedForecast ?? null,
+    }
+  } catch (e) {
+    console.warn('NOAA fetch failed:', e)
+    return null
+  }
 }
 
-export async function sendMessageToMike(messages, forecastContext = null) {
-  const systemContent = buildSystemContent(
+function buildSystemContent(forecastContext, weatherContext) {
+  const now = new Date()
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
+  let prompt = MIKE_SYSTEM_PROMPT
+  prompt += `\n\nCurrent date and time: ${dateStr}, ${timeStr}`
+
+  const formattedForecast =
     typeof forecastContext === 'string' ? forecastContext : formatForecastContext(forecastContext)
+  if (formattedForecast?.trim()) {
+    prompt += `\n\nCurrent avalanche forecast (reference directly):\n${formattedForecast}`
+  }
+
+  if (weatherContext) {
+    prompt += `\n\nCurrent NOAA weather at this location:
+- Conditions: ${weatherContext.current.shortForecast}
+- Temp: ${weatherContext.current.temp}°${weatherContext.current.unit}
+- Wind: ${weatherContext.current.wind} from ${weatherContext.current.windDir}
+- Tonight: ${weatherContext.tonight ?? 'unavailable'}
+- Tomorrow: ${weatherContext.tomorrow ?? 'unavailable'}`
+  }
+
+  return prompt
+}
+
+export async function sendMessageToMike(messages, forecastContext = null, weatherContext = null) {
+  const systemContent = buildSystemContent(
+    typeof forecastContext === 'string' ? forecastContext : formatForecastContext(forecastContext),
+    weatherContext
   )
   const response = await groq.chat.completions.create({
     model: 'llama-3.1-8b-instant',

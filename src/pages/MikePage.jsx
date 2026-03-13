@@ -1,17 +1,39 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { sendMessageToMike } from '../services/groq'
+import { sendMessageToMike, fetchNOAAWeather } from '../services/groq'
 import { useRouteStore } from '../store/routeStore'
-import { Send } from 'lucide-react'
 import mikeImg from '../assets/images/Salm_Miles-Clark-1.jpg'
 
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg: '#0A0F14',
+  panel: '#070C10',
+  border: 'rgba(240,237,232,0.09)',
+  borderHover: 'rgba(240,237,232,0.22)',
+  text: '#F0EDE8',
+  muted: 'rgba(240,237,232,0.45)',
+  faint: 'rgba(240,237,232,0.22)',
+  ghost: 'rgba(240,237,232,0.04)',
+  userBubble: 'rgba(240,237,232,0.1)',
+  mikeBubble: '#070C10',
+}
+const LABEL = {
+  fontFamily: "'Barlow Condensed', sans-serif",
+  textTransform: 'uppercase',
+  letterSpacing: '0.14em',
+}
+
+// ── Inline SVG ────────────────────────────────────────────────────────────────
+const IconSend = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 7L2 2l2 5-2 5 10-5z"/>
+  </svg>
+)
+
+// ── Data ──────────────────────────────────────────────────────────────────────
 const TOPIC_CHIPS = [
-  'Avalanche Safety',
-  'Trip Planning',
-  'Gear',
-  'Reading Forecasts',
-  'Snow Science',
-  'Route Selection',
+  'Avalanche Safety', 'Trip Planning', 'Gear',
+  'Reading Forecasts', 'Snow Science', 'Route Selection',
 ]
 
 const STARTER_PROMPTS = [
@@ -21,122 +43,104 @@ const STARTER_PROMPTS = [
   'How do I assess slope angle in the field?',
 ]
 
+const REGION_CENTERS = {
+  sierra: { lat: 38.5, lng: -119.5 },
+  shasta: { lat: 41.4, lng: -122.2 },
+  bridgeport: { lat: 38.3, lng: -119.3 },
+  eastern_sierra: { lat: 37.6, lng: -118.9 },
+}
+
 function formatTime(date) {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function MikePage() {
-  const forecast = useRouteStore((s) => s.forecast)
+  const forecast = useRouteStore(s => s.forecast)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const chatEndRef = useRef(null)
   const inputRef = useRef(null)
 
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+  useEffect(() => { inputRef.current?.focus() }, [])
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
   const sendMessage = async (content) => {
     const trimmed = (typeof content === 'string' ? content : input).trim()
     if (!trimmed || loading) return
-
-    const userMessage = {
-      role: 'user',
-      content: trimmed,
-      timestamp: new Date(),
-    }
-    setMessages((prev) => [...prev, userMessage])
+    const userMessage = { role: 'user', content: trimmed, timestamp: new Date() }
+    setMessages(prev => [...prev, userMessage])
     setInput('')
     setLoading(true)
-
     try {
-      const history = [...messages, userMessage].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }))
-      const reply = await sendMessageToMike(history, forecast)
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: reply, timestamp: new Date() },
-      ])
+      const history = [...messages, userMessage].map(m => ({ role: m.role, content: m.content }))
+      const center = REGION_CENTERS[forecast?.region] ?? REGION_CENTERS.sierra
+      const weather = await fetchNOAAWeather(center.lat, center.lng)
+      const reply = await sendMessageToMike(history, forecast, weather)
+      setMessages(prev => [...prev, { role: 'assistant', content: reply, timestamp: new Date() }])
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            "Having trouble connecting. Check your connection and try again.",
-          timestamp: new Date(),
-        },
-      ])
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Having trouble connecting. Check your connection and try again.', timestamp: new Date() }])
     } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleSubmit = (e) => {
-    e?.preventDefault()
-    sendMessage(input)
+      setLoading(false) }
   }
 
   return (
-    <div
-      className="flex flex-col md:flex-row min-h-[calc(100vh-3.5rem)]"
-      style={{ backgroundColor: '#0F1923' }}
-    >
-      {/* Left column - Mike's profile (hidden on mobile) */}
-      <aside className="hidden md:block md:w-[30%] md:max-w-sm p-4 shrink-0">
+    <div style={{ display: 'flex', minHeight: 'calc(100vh - 3.5rem)', backgroundColor: C.bg }}>
+
+      {/* ── Left sidebar — Mike's profile ── */}
+      <aside className="hidden md:flex" style={{ width: 260, flexShrink: 0, flexDirection: 'column', borderRight: `1px solid ${C.border}`, padding: 24, overflowY: 'auto' }}>
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
+          initial={{ opacity: 0, x: -16 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
-          className="sticky top-4 rounded-xl p-6 border border-border"
-          style={{ backgroundColor: '#1E2D3D' }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+          style={{ position: 'sticky', top: 0 }}
         >
-          <div
-            className="w-20 h-20 rounded-full mx-auto flex items-center justify-center overflow-hidden mb-4"
-            style={{ backgroundColor: '#1E2D3D' }}
-          >
-            <img src={mikeImg} alt="Mike" className="w-full h-full object-cover" />
+          {/* Avatar */}
+          <div style={{ width: 72, height: 72, overflow: 'hidden', marginBottom: 14, border: `1px solid ${C.border}` }}>
+            <img src={mikeImg} alt="Mike" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
-          <h1 className="text-2xl font-bold text-white text-center">Mike</h1>
-          <p className="text-center text-text-secondary text-sm mt-1">
+
+          {/* Name + title */}
+          <h1 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', color: C.text, margin: '0 0 3px' }}>
+            Mike
+          </h1>
+          <div style={{ ...LABEL, fontSize: 9, color: C.faint, marginBottom: 14 }}>
             Backcountry Guide · Sierra Nevada
-          </p>
-          <div className="flex flex-wrap justify-center gap-2 mt-3">
-            <span className="px-2 py-1 rounded-full text-xs font-medium text-text-secondary bg-background-elevated">
-              Sierra & Shasta
-            </span>
           </div>
-          <p className="text-text-primary text-sm mt-4 leading-relaxed">
+
+          {/* Bio */}
+          <p style={{ fontFamily: "'Barlow', sans-serif", fontSize: 12, color: C.muted, lineHeight: 1.65, margin: '0 0 16px', borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
             I've skied the Sierra for 20 years and guided in the Cascades and Eastern Sierra.
             I'm here to give you direct, safety-focused advice. Ask me anything.
           </p>
-          <p
-            className="mt-3 italic"
-            style={{ fontSize: '11px', color: '#4A5568', lineHeight: 1.4 }}
-          >
+
+          {/* Disclaimer */}
+          <p style={{ fontFamily: "'Barlow', sans-serif", fontSize: 10, color: C.faint, fontStyle: 'italic', lineHeight: 1.5, margin: '0 0 20px', paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
             Mike is an AI assistant, not a real guide or certified instructor.
-            Always consult official avalanche forecasts and consider taking a
-            real AIARE course before heading into the backcountry.
+            Always consult official avalanche forecasts and consider taking a real AIARE course.
           </p>
-          <hr className="border-border my-4" />
-          <p className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-2">
-            Topics I can help with:
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {TOPIC_CHIPS.map((topic) => (
+
+          {/* Topic chips */}
+          <div style={{ ...LABEL, fontSize: 9, color: C.faint, marginBottom: 10 }}>Topics</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {TOPIC_CHIPS.map(topic => (
               <button
                 key={topic}
                 type="button"
                 onClick={() => sendMessage(topic)}
                 disabled={loading}
-                className="px-3 py-1.5 rounded-full text-sm text-text-primary border border-accent-blue hover:bg-accent-blue/20 transition-colors disabled:opacity-50"
+                style={{
+                  padding: '4px 10px',
+                  border: `1px solid ${C.border}`,
+                  backgroundColor: 'transparent',
+                  color: loading ? C.faint : C.muted,
+                  ...LABEL, fontSize: 9,
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  transition: 'border-color 0.15s, color 0.15s',
+                }}
+                onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = C.borderHover; e.currentTarget.style.color = C.text }}}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = loading ? C.faint : C.muted }}
               >
                 {topic}
               </button>
@@ -145,32 +149,46 @@ export default function MikePage() {
         </motion.div>
       </aside>
 
-      {/* Right column - Chat */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* ── Right — Chat ── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+
         {/* Mobile header */}
-        <header className="md:hidden flex items-center gap-2 px-4 py-3 border-b border-border">
-          <div className="w-9 h-9 rounded-full overflow-hidden shrink-0">
-            <img src={mikeImg} alt="Mike" className="w-full h-full object-cover" />
+        <header className="flex md:hidden" style={{
+          alignItems: 'center', gap: 12, padding: '12px 16px',
+          borderBottom: `1px solid ${C.border}`,
+          flexShrink: 0,
+        }}>
+          <div style={{ width: 36, height: 36, overflow: 'hidden', flexShrink: 0, border: `1px solid ${C.border}` }}>
+            <img src={mikeImg} alt="Mike" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <div>
-            <span className="font-semibold text-white">Mike</span>
-            <span className="text-text-secondary text-sm block">
-              Backcountry Guide · Sierra Nevada
-            </span>
+            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 14, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: C.text }}>Mike</div>
+            <div style={{ ...LABEL, fontSize: 8, color: C.faint }}>Backcountry Guide · Sierra Nevada</div>
           </div>
         </header>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
           {messages.length === 0 && !loading && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto w-full">
-              {STARTER_PROMPTS.map((prompt) => (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 2, maxWidth: 560, margin: '0 auto', width: '100%' }}>
+              {STARTER_PROMPTS.map(prompt => (
                 <button
                   key={prompt}
                   type="button"
                   onClick={() => sendMessage(prompt)}
-                  className="text-left p-4 rounded-xl border-2 border-accent-blue text-white hover:bg-accent-blue/10 transition-colors"
-                  style={{ backgroundColor: '#1E2D3D' }}
+                  style={{
+                    textAlign: 'left', padding: '14px',
+                    border: `1px solid ${C.border}`,
+                    backgroundColor: C.ghost,
+                    color: C.muted,
+                    fontFamily: "'Barlow', sans-serif",
+                    fontSize: 12, lineHeight: 1.5,
+                    cursor: 'pointer',
+                    transition: 'border-color 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.borderHover; e.currentTarget.style.color = C.text }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.muted }}
                 >
                   {prompt}
                 </button>
@@ -178,60 +196,49 @@ export default function MikePage() {
             </div>
           )}
 
-          {messages.map((msg) => (
+          {messages.map(msg => (
             <motion.div
               key={msg.timestamp?.getTime?.() ?? Math.random()}
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className={`flex flex-col ${
-                msg.role === 'user' ? 'items-end' : 'items-start'
-              }`}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}
             >
               {msg.role === 'assistant' && (
-                <span className="text-sm text-text-secondary mb-1 flex items-center gap-1">
-                  Mike
-                </span>
+                <div style={{ ...LABEL, fontSize: 8, color: C.faint, marginBottom: 5 }}>Mike</div>
               )}
-              <div
-                className={`max-w-[85%] sm:max-w-[75%] px-4 py-2.5 rounded-2xl text-white ${
-                  msg.role === 'user'
-                    ? 'rounded-br-sm'
-                    : 'rounded-bl-sm'
-                }`}
-                style={{
-                  backgroundColor:
-                    msg.role === 'user' ? '#3B8BEB' : '#1E2D3D',
-                }}
-              >
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+              <div style={{
+                maxWidth: '78%',
+                padding: '10px 14px',
+                border: `1px solid ${msg.role === 'user' ? 'rgba(240,237,232,0.2)' : C.border}`,
+                backgroundColor: msg.role === 'user' ? C.userBubble : C.mikeBubble,
+                fontFamily: "'Barlow', sans-serif",
+                fontSize: 13, lineHeight: 1.65,
+                color: C.text,
+                whiteSpace: 'pre-wrap',
+              }}>
+                {msg.content}
               </div>
-              <span className="text-xs text-text-muted mt-1">
+              <div style={{ ...LABEL, fontSize: 8, color: C.faint, marginTop: 4 }}>
                 {msg.timestamp && formatTime(msg.timestamp)}
-              </span>
+              </div>
             </motion.div>
           ))}
 
           {loading && (
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="flex flex-col items-start"
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
             >
-              <span className="text-sm text-text-secondary mb-1 flex items-center gap-1">
-                Mike
-              </span>
-              <div
-                className="px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1"
-                style={{ backgroundColor: '#1E2D3D' }}
-              >
-                {[0, 1, 2].map((i) => (
+              <div style={{ ...LABEL, fontSize: 8, color: C.faint, marginBottom: 5 }}>Mike</div>
+              <div style={{ padding: '12px 16px', border: `1px solid ${C.border}`, backgroundColor: C.mikeBubble, display: 'flex', gap: 5, alignItems: 'center' }}>
+                {[0, 1, 2].map(i => (
                   <motion.span
                     key={i}
-                    className="w-2 h-2 rounded-full bg-text-muted"
-                    animate={{ y: [0, -6, 0] }}
-                    transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.15 }}
+                    style={{ width: 5, height: 5, backgroundColor: C.faint, display: 'inline-block' }}
+                    animate={{ opacity: [0.3, 1, 0.3] }}
+                    transition={{ repeat: Infinity, duration: 1, delay: i * 0.2 }}
                   />
                 ))}
               </div>
@@ -241,46 +248,57 @@ export default function MikePage() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input */}
-        <form
-          onSubmit={handleSubmit}
-          className="p-4 border-t border-border shrink-0"
-        >
-          <div
-            className="flex gap-2 rounded-xl border overflow-hidden"
+        {/* Input bar */}
+        <div style={{
+          flexShrink: 0,
+          borderTop: `1px solid ${C.border}`,
+          padding: '12px 16px',
+          display: 'flex', gap: 8, alignItems: 'stretch',
+        }}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input) }}}
+            placeholder="Ask Mike anything…"
+            disabled={loading}
             style={{
-              backgroundColor: '#1E2D3D',
-              borderColor: '#2D3748',
+              flex: 1,
+              padding: '10px 14px',
+              border: `1px solid ${C.border}`,
+              backgroundColor: C.ghost,
+              color: C.text,
+              fontFamily: "'Barlow', sans-serif",
+              fontSize: 13,
+              outline: 'none',
+              opacity: loading ? 0.5 : 1,
+              transition: 'border-color 0.15s',
             }}
+            onFocus={e => e.target.style.borderColor = C.borderHover}
+            onBlur={e => e.target.style.borderColor = C.border}
+          />
+          <button
+            type="button"
+            onClick={() => sendMessage(input)}
+            disabled={loading || !input.trim()}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 42,
+              border: `1px solid ${(!loading && input.trim()) ? 'rgba(240,237,232,0.4)' : C.border}`,
+              backgroundColor: (!loading && input.trim()) ? 'rgba(240,237,232,0.08)' : 'transparent',
+              color: (!loading && input.trim()) ? C.text : C.faint,
+              cursor: (!loading && input.trim()) ? 'pointer' : 'not-allowed',
+              transition: 'border-color 0.15s, color 0.15s, background-color 0.15s',
+              flexShrink: 0,
+            }}
+            aria-label="Send"
           >
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSubmit()
-                }
-              }}
-              placeholder="Ask Mike anything..."
-              disabled={loading}
-              className="flex-1 bg-transparent px-4 py-3 text-white placeholder-text-muted focus:outline-none disabled:opacity-60"
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="p-3 text-white disabled:opacity-50 hover:opacity-90 transition-opacity shrink-0"
-              style={{ backgroundColor: '#3B8BEB' }}
-              aria-label="Send"
-            >
-              <motion.span whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                <Send className="w-5 h-5" />
-              </motion.span>
-            </button>
-          </div>
-        </form>
+            <motion.span whileTap={(!loading && input.trim()) ? { scale: 0.85 } : {}}>
+              <IconSend />
+            </motion.span>
+          </button>
+        </div>
       </div>
     </div>
   )

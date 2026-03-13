@@ -1,5 +1,11 @@
 import { useState } from 'react'
 
+const LABEL = {
+  fontFamily: "'Barlow Condensed', sans-serif",
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+}
+
 export default function LayerTogglePanel({
   currentStyle,
   onStyleChange,
@@ -7,22 +13,25 @@ export default function LayerTogglePanel({
   topoStyleUrl,
   activeLayers = [],
   onLayerToggle,
+  windEnabled = false,
+  onWindToggle,
+  windLoading = false,
+  windZoomBlocked = false,
+  precipRadarEnabled = false,
+  onPrecipRadarToggle,
+  precipRadarLoading = false,
+  snowDepthEnabled = false,
+  onSnowDepthToggle,
 }) {
   const STORAGE_KEY = 'calpow_layers_collapsed'
   const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) === 'true'
-    } catch {
-      return false
-    }
+    try { return localStorage.getItem(STORAGE_KEY) === 'true' } catch { return false }
   })
 
   const toggleCollapsed = () => {
     const next = !collapsed
     setCollapsed(next)
-    try {
-      localStorage.setItem(STORAGE_KEY, String(next))
-    } catch (_) {}
+    try { localStorage.setItem(STORAGE_KEY, String(next)) } catch (_) {}
   }
 
   const styleOptions = [
@@ -45,82 +54,166 @@ export default function LayerTogglePanel({
     onLayerToggle(next)
   }
 
-  return (
-    <div
-      className="rounded-lg shadow-lg flex flex-col min-w-[160px]"
+  const SectionLabel = ({ children }) => (
+    <div style={{
+      ...LABEL,
+      fontSize: 9, fontWeight: 700,
+      color: 'rgba(240,237,232,0.3)',
+      padding: '8px 0 4px',
+      borderTop: '1px solid rgba(240,237,232,0.07)',
+      marginTop: 2,
+    }}>
+      {children}
+    </div>
+  )
+
+  const LayerBtn = ({ active, onClick, disabled, children }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
       style={{
-        background: 'rgba(30, 45, 61, 0.55)',
-        backdropFilter: 'blur(8px)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        display: 'block', width: '100%',
+        textAlign: 'left',
+        padding: '7px 10px',
+        border: `1px solid ${active ? 'rgba(240,237,232,0.45)' : 'rgba(240,237,232,0.08)'}`,
+        backgroundColor: active ? 'rgba(240,237,232,0.1)' : 'transparent',
+        color: active ? '#F0EDE8' : 'rgba(240,237,232,0.4)',
+        ...LABEL,
+        fontSize: 11, fontWeight: active ? 700 : 500,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        marginBottom: 3,
+        transition: 'border-color 0.15s, color 0.15s, background-color 0.15s',
       }}
+      onMouseEnter={e => { if (!disabled && !active) { e.currentTarget.style.borderColor = 'rgba(240,237,232,0.25)'; e.currentTarget.style.color = 'rgba(240,237,232,0.75)' }}}
+      onMouseLeave={e => { if (!disabled && !active) { e.currentTarget.style.borderColor = 'rgba(240,237,232,0.08)'; e.currentTarget.style.color = 'rgba(240,237,232,0.4)' }}}
     >
-      {/* Title bar with minimize */}
-      <div
-        className="flex items-center justify-between px-3 py-2 gap-2"
-        style={{ borderBottom: collapsed ? 'none' : '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-          LAYERS
+      {children}
+    </button>
+  )
+
+  return (
+    <div style={{
+      backgroundColor: 'rgba(7,12,16,0.92)',
+      backdropFilter: 'blur(12px)',
+      border: '1px solid rgba(240,237,232,0.1)',
+      minWidth: 168,
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '8px 12px',
+        borderBottom: collapsed ? 'none' : '1px solid rgba(240,237,232,0.07)',
+      }}>
+        <span style={{
+          ...LABEL, fontSize: 9, fontWeight: 700,
+          color: 'rgba(240,237,232,0.4)',
+        }}>
+          Layers
         </span>
         <button
           type="button"
           onClick={toggleCollapsed}
-          className="p-0.5 rounded hover:bg-white/10 text-text-secondary hover:text-white transition-colors"
           aria-label={collapsed ? 'Expand' : 'Collapse'}
+          style={{
+            border: 'none', background: 'transparent',
+            color: 'rgba(240,237,232,0.3)', cursor: 'pointer',
+            fontSize: 9, padding: '2px 4px',
+            transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'rgba(240,237,232,0.7)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'rgba(240,237,232,0.3)'}
         >
-          <span style={{ fontSize: 10 }}>{collapsed ? '▶' : '▼'}</span>
+          {collapsed ? '▶' : '▼'}
         </button>
       </div>
+
       {!collapsed && (
-        <div className="p-3 pt-2 flex flex-col gap-1">
+        <div style={{ padding: '8px 12px 10px' }}>
+
+          {/* Map style */}
           {styleOptions.map((opt) => {
-        const isActive = currentStyle === opt.id
-        return (
-          <button
-            key={opt.id}
-            type="button"
-            onClick={() => onStyleChange(opt.styleUrl, opt.id)}
-            className={`text-left px-3 py-2 rounded text-sm font-medium transition-colors ${
-              isActive
-                ? 'text-white'
-                : 'text-text-secondary hover:text-text-primary hover:bg-background-elevated'
-            }`}
-            style={isActive ? { backgroundColor: '#3B8BEB' } : {}}
-          >
-            {opt.label}
-          </button>
-        )
-      })}
-      {onLayerToggle && (
-        <>
-          <div className="border-t border-white/10 mt-2 pt-2">
-            <span className="text-xs font-medium text-text-secondary uppercase tracking-wider px-1 mb-1 block">
-              Terrain layers
-            </span>
-            {terrainLayers.map(({ id, label }) => {
-              const isActive = activeLayers.includes(id)
-              return (
-                <button
+            const active = currentStyle === opt.id
+            return (
+              <LayerBtn key={opt.id} active={active} onClick={() => onStyleChange(opt.styleUrl, opt.id)}>
+                {opt.label}
+              </LayerBtn>
+            )
+          })}
+
+          {/* Terrain layers */}
+          {onLayerToggle && (
+            <>
+              <SectionLabel>Terrain Layers</SectionLabel>
+              {terrainLayers.map(({ id, label }) => (
+                <LayerBtn
                   key={id}
-                  type="button"
+                  active={activeLayers.includes(id)}
                   onClick={() => toggleTerrainLayer(id)}
-                  className={`text-left px-3 py-2 rounded text-sm font-medium transition-colors w-full ${
-                    isActive
-                      ? 'text-white'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-background-elevated'
-                  }`}
-                  style={isActive ? { backgroundColor: '#3B8BEB' } : {}}
                 >
                   {label}
-                </button>
-              )
-            })}
+                </LayerBtn>
+              ))}
+            </>
+          )}
+
+          {/* Wind */}
+          {onWindToggle && (
+            <>
+              <SectionLabel>Wind</SectionLabel>
+              <LayerBtn
+                active={windEnabled}
+                onClick={() => onWindToggle(!windEnabled)}
+                disabled={windLoading}
+              >
+                {windLoading ? 'Loading…' : 'Wind'}
+              </LayerBtn>
+              {windZoomBlocked && (
+                <div style={{
+                  ...LABEL, fontSize: 9,
+                  color: 'rgba(251,191,36,0.8)',
+                  padding: '2px 2px 4px',
+                }}>
+                  Zoom in to view
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Precip */}
+          {onPrecipRadarToggle && (
+            <>
+              <SectionLabel>Precip</SectionLabel>
+              <LayerBtn
+                active={precipRadarEnabled}
+                onClick={() => onPrecipRadarToggle(!precipRadarEnabled)}
+                disabled={precipRadarLoading}
+              >
+                {precipRadarLoading ? 'Loading…' : 'Precip Radar'}
+              </LayerBtn>
+              {onSnowDepthToggle && (
+                <LayerBtn
+                  active={snowDepthEnabled}
+                  onClick={() => onSnowDepthToggle(!snowDepthEnabled)}
+                >
+                  Snow Depth
+                </LayerBtn>
+              )}
+            </>
+          )}
+
+          {/* Footer hint */}
+          <div style={{
+            marginTop: 10, paddingTop: 8,
+            borderTop: '1px solid rgba(240,237,232,0.07)',
+            fontFamily: "'Barlow', sans-serif",
+            fontSize: 9, fontStyle: 'italic',
+            color: 'rgba(240,237,232,0.2)',
+            lineHeight: 1.5,
+          }}>
+            Right-click anywhere on the map for terrain analysis
           </div>
-        </>
-      )}
-      <p className="text-[11px] text-white italic px-1 mt-2 pt-1 border-t border-white/10">
-        Right-click anywhere on the map for terrain analysis
-      </p>
         </div>
       )}
     </div>
