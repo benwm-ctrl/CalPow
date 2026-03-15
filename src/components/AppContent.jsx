@@ -12,6 +12,7 @@ import BeforeYouGoPage from '../pages/BeforeYouGoPage'
 import MikePage from '../pages/MikePage'
 import ProfilePage from '../pages/ProfilePage'
 import NotFoundPage from '../pages/NotFoundPage'
+import CreditsFooter from './CreditsFooter'
 
 const pageVariants = {
   initial: { opacity: 0, y: 12 },
@@ -23,7 +24,7 @@ export default function AppContent() {
   const location = useLocation()
 
   return (
-    <div className="min-h-screen bg-background-primary">
+    <div className="min-h-screen bg-background-primary flex flex-col">
       <Navbar />
       <AnimatePresence mode="wait">
         <motion.div
@@ -32,7 +33,7 @@ export default function AppContent() {
           initial="initial"
           animate="animate"
           exit="exit"
-          className={location.pathname === '/' ? 'min-h-screen' : 'min-h-[calc(100vh-4rem)] pt-16'}
+          className={location.pathname === '/' ? 'min-h-screen flex-1' : 'min-h-[calc(100vh-4rem)] pt-16 flex-1'}
         >
           <Routes location={location}>
             <Route path="/" element={<HomePage />} />
@@ -56,6 +57,7 @@ export default function AppContent() {
           </Routes>
         </motion.div>
       </AnimatePresence>
+      <CreditsFooter />
     </div>
   )
 }
