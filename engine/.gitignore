@@ -4,7 +4,8 @@ __pycache__/
 *.egg-info/
 .env
 
-# Generated terrain tiles (large, rebuild with run_pipeline.py)
+# Generated terrain tiles from run_pipeline.py — rebuild with real 3DEP data
+# NOTE: demo_data/ is intentionally tracked (bundled synthetic tiles for Railway)
 data/
 outputs/
 

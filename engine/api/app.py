@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 # Add engine root to Python path so api/ imports work when run from engine/
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import OUTPUT_DIR, DATA_DIR, FLOWPY, SX, COST
+from config import OUTPUT_DIR, DATA_DIR, FLOWPY, SX, COST, get_tile_dir
 from pipeline.lcp import find_lcp, result_to_geojson, RouteResult
 from api.models import (
     RouteRequest, RouteResponse, SegmentStat, ForecastContext
@@ -79,16 +79,18 @@ def _load_raster(path: Path) -> np.ndarray | None:
 
 def _load_tiles():
     """Load all precomputed Tier-A layers at startup."""
-    TILES.elevation   = _load_raster(DATA_DIR / "dem_10m.tif")
-    TILES.slope       = _load_raster(OUTPUT_DIR / "slope.tif")
-    TILES.aspect      = _load_raster(OUTPUT_DIR / "aspect.tif")
-    TILES.pra         = _load_raster(OUTPUT_DIR / "pra.tif")
-    TILES.z_delta     = _load_raster(OUTPUT_DIR / "z_delta.tif")
-    TILES.cell_counts = _load_raster(OUTPUT_DIR / "cell_counts.tif")
-    TILES.cost_base   = _load_raster(OUTPUT_DIR / "cost_surface.tif")
+    tile_dir = get_tile_dir()
+    print(f"[startup] Loading tiles from: {tile_dir}")
+    TILES.elevation   = _load_raster(tile_dir / "dem_10m.tif")
+    TILES.slope       = _load_raster(tile_dir / "slope.tif")
+    TILES.aspect      = _load_raster(tile_dir / "aspect.tif")
+    TILES.pra         = _load_raster(tile_dir / "pra.tif")
+    TILES.z_delta     = _load_raster(tile_dir / "z_delta.tif")
+    TILES.cell_counts = _load_raster(tile_dir / "cell_counts.tif")
+    TILES.cost_base   = _load_raster(tile_dir / "cost_surface.tif")
 
     # Load all available Sx tiles (e.g. sx_315.tif, sx_45.tif, …)
-    for sx_path in sorted(OUTPUT_DIR.glob("sx_*.tif")):
+    for sx_path in sorted(tile_dir.glob("sx_*.tif")):
         try:
             az = int(sx_path.stem.split("_")[1])
             TILES.sx[az] = _load_raster(sx_path)
@@ -96,7 +98,7 @@ def _load_tiles():
             pass
 
     # Read transform/CRS from cost surface (all tiles share the same grid)
-    cost_path = OUTPUT_DIR / "cost_surface.tif"
+    cost_path = tile_dir / "cost_surface.tif"
     if cost_path.exists():
         with rasterio.open(cost_path) as src:
             TILES.transform = src.transform
