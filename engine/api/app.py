@@ -31,8 +31,9 @@ from typing import Optional
 
 import numpy as np
 import rasterio
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 # Add engine root to Python path so api/ imports work when run from engine/
@@ -144,14 +145,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+}
+
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return Response(status_code=200, headers=CORS_HEADERS)
+    response = await call_next(request)
+    for k, v in CORS_HEADERS.items():
+        response.headers[k] = v
+    return response
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
