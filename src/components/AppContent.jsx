@@ -1,38 +1,55 @@
+import { lazy, Suspense } from 'react'
 import { useLocation, Routes, Route } from 'react-router-dom'
 import Navbar from './Navbar'
-import HomePage from '../pages/HomePage'
-import LoginPage from '../pages/LoginPage'
-import MapPage from '../pages/MapPage'
-import LibraryPage from '../pages/LibraryPage'
-import RouteDetailPage from '../pages/RouteDetailPage'
-import EducationPage from '../pages/EducationPage'
-import BeforeYouGoPage from '../pages/BeforeYouGoPage'
-import MikePage from '../pages/MikePage'
-import ProfilePage from '../pages/ProfilePage'
-import NotFoundPage from '../pages/NotFoundPage'
-import CreditsFooter from './CreditsFooter'
+
+const HomePage = lazy(() => import('../pages/HomePage'))
+const LoginPage = lazy(() => import('../pages/LoginPage'))
+const MapPage = lazy(() => import('../pages/MapPage'))
+const LibraryPage = lazy(() => import('../pages/LibraryPage'))
+const RouteDetailPage = lazy(() => import('../pages/RouteDetailPage'))
+const EducationPage = lazy(() => import('../pages/EducationPage'))
+const BeforeYouGoPage = lazy(() => import('../pages/BeforeYouGoPage'))
+const MikePage = lazy(() => import('../pages/MikePage'))
+const ProfilePage = lazy(() => import('../pages/ProfilePage'))
+const NotFoundPage = lazy(() => import('../pages/NotFoundPage'))
+const CreditsFooter = lazy(() => import('./CreditsFooter'))
+
+function Loading() {
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      backgroundColor: '#0A0F14', color: 'rgba(240,237,232,0.3)',
+      fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11,
+      letterSpacing: '0.14em', textTransform: 'uppercase',
+    }}>
+      Loading
+    </div>
+  )
+}
 
 export default function AppContent() {
   const location = useLocation()
 
   return (
-    <div className="min-h-screen bg-background-primary flex flex-col">
+    <div style={{ minHeight: '100vh', backgroundColor: '#0A0F14', display: 'flex', flexDirection: 'column' }}>
       <Navbar />
-      <div className={location.pathname === '/' ? 'min-h-screen flex-1' : 'min-h-[calc(100vh-4rem)] pt-16 flex-1'}>
-        <Routes location={location}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/map" element={<MapPage />} />
-          <Route path="/library" element={<LibraryPage />} />
-          <Route path="/library/:id" element={<RouteDetailPage />} />
-          <Route path="/education" element={<EducationPage />} />
-          <Route path="/before-you-go" element={<BeforeYouGoPage />} />
-          <Route path="/mike" element={<MikePage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </div>
-      <CreditsFooter />
+      <Suspense fallback={<Loading />}>
+        <div className={location.pathname === '/' ? 'min-h-screen flex-1' : 'min-h-[calc(100vh-4rem)] pt-16 flex-1'}>
+          <Routes location={location}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/map" element={<MapPage />} />
+            <Route path="/library" element={<LibraryPage />} />
+            <Route path="/library/:id" element={<RouteDetailPage />} />
+            <Route path="/education" element={<EducationPage />} />
+            <Route path="/before-you-go" element={<BeforeYouGoPage />} />
+            <Route path="/mike" element={<MikePage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </div>
+        <CreditsFooter />
+      </Suspense>
     </div>
   )
 }
