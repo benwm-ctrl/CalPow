@@ -1,0 +1,17 @@
+# CalPow engine — Railway deployment config
+# Deploy from the engine/ subdirectory of the CalPow repo.
+# In Railway dashboard: set "Root Directory" to "engine"
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uvicorn api.app:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 60       # seconds — first start downloads nothing but initialises rasterio
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[[services]]
+name = "calpow-engine"
