@@ -285,7 +285,7 @@ class AutoRouteResponse(RouteResponse):
     )
 
 
-@app.post("/route/auto", response_model=AutoRouteResponse)
+@app.post("/route/auto")
 def route_auto(req: AutoRouteRequest):
     """
     Find the least-cost path with automatic Tier-B data synthesis.
@@ -300,6 +300,16 @@ def route_auto(req: AutoRouteRequest):
     Degrades gracefully: if Open-Meteo or AFP are unavailable, routing falls
     back to the static Tier-A cost surface and warnings are returned.
     """
+    try:
+        return _route_auto_inner(req)
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[route/auto ERROR] {exc}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
+
+
+def _route_auto_inner(req: AutoRouteRequest):
     # Midpoint for zone lookup and wind fetch
     mid_lon = (req.start[0] + req.end[0]) / 2
     mid_lat = (req.start[1] + req.end[1]) / 2
