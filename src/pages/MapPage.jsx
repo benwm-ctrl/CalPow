@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import { SearchBox } from '@mapbox/search-js-react'
+
 import { useRouteStore } from '../store/routeStore'
 import LayerTogglePanel from '../components/LayerTogglePanel'
 import RouteBuilder from '../components/RouteBuilder'
@@ -2035,32 +2035,7 @@ export default function MapPage() {
               background: 'transparent',
             }}
           >
-            {mapRef.current && (
-              <SearchBox
-                accessToken={import.meta.env.VITE_MAPBOX_TOKEN}
-                map={mapRef.current}
-                mapboxgl={mapboxgl}
-                value={searchValue}
-                onChange={(v) => setSearchValue(v)}
-                onRetrieve={(res) => {
-                  const feat = res.features?.[0]
-                  if (feat?.geometry?.coordinates) {
-                    const [lng, lat] = feat.geometry.coordinates
-                    mapRef.current?.flyTo({ center: [lng, lat], zoom: 13 })
-                  }
-                }}
-                theme={{
-                  variables: {
-                    colorBackground: 'rgba(30, 45, 61, 0.55)',
-                    colorBackgroundHover: 'rgba(36, 52, 71, 0.65)',
-                    colorText: '#F7FAFC',
-                    colorTextSecondary: '#A0AEC0',
-                    borderRadius: '8px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                  },
-                }}
-              />
-            )}
+{/* search removed */}
           </div>
           {!anchorMode && (
             <>
