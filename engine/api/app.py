@@ -291,15 +291,44 @@ def route_auto(req: AutoRouteRequest):
     Degrades gracefully: if Open-Meteo or AFP are unavailable, routing falls
     back to the static Tier-A cost surface and warnings are returned.
     """
-    if not TILES.loaded:
-        raise HTTPException(
-            status_code=503,
-            detail="Terrain tiles not loaded. Run run_pipeline.py first."
-        )
-
     # Midpoint for zone lookup and wind fetch
     mid_lon = (req.start[0] + req.end[0]) / 2
     mid_lat = (req.start[1] + req.end[1]) / 2
+
+    if not TILES.loaded:
+        # ── Stub mode: no terrain tiles yet — return straight-line route ─────
+        # This lets the frontend end-to-end flow be validated before tiles
+        # are generated. Clearly flagged as stub in live_context.
+        stub_geojson = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [req.start[0], req.start[1]],
+                        [mid_lon, mid_lat],
+                        [req.end[0], req.end[1]],
+                    ],
+                },
+                "properties": {"stub": True},
+            }],
+        }
+        return AutoRouteResponse(
+            geometry=stub_geojson,
+            total_cost=0.0,
+            n_cells=3,
+            segment_stats=[
+                SegmentStat(slope_deg=float("nan"), pra_membership=float("nan"),
+                            z_delta_m=float("nan"), cell_counts=float("nan"), mean_cost=float("nan")),
+            ],
+            forecast_applied=False,
+            live_context={
+                "stub": True,
+                "warning": "Terrain tiles not loaded — straight-line stub route returned. "
+                           "Run run_pipeline.py to generate real terrain data.",
+            },
+        )
 
     # ── Fetch Tier-B live context ─────────────────────────────────────────────
     live = fetch_live_context(
