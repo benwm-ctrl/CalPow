@@ -314,7 +314,7 @@ def _route_auto_inner(req: AutoRouteRequest):
     mid_lon = (req.start[0] + req.end[0]) / 2
     mid_lat = (req.start[1] + req.end[1]) / 2
 
-    if not TILES.loaded:
+    if True:  # TODO: replace with `not TILES.loaded` once LCP crash is resolved
         # ── Stub mode: no terrain tiles yet — return straight-line route ─────
         # This lets the frontend end-to-end flow be validated before tiles
         # are generated. Clearly flagged as stub in live_context.
