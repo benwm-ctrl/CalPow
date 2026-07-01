@@ -1,0 +1,63 @@
+import { useLocation, Routes, Route, Outlet } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
+import Navbar from './Navbar'
+import ProtectedRoute from './ProtectedRoute'
+import HomePage from '../pages/HomePage'
+import LoginPage from '../pages/LoginPage'
+import MapPage from '../pages/MapPage'
+import LibraryPage from '../pages/LibraryPage'
+import RouteDetailPage from '../pages/RouteDetailPage'
+import EducationPage from '../pages/EducationPage'
+import BeforeYouGoPage from '../pages/BeforeYouGoPage'
+import MikePage from '../pages/MikePage'
+import ProfilePage from '../pages/ProfilePage'
+import NotFoundPage from '../pages/NotFoundPage'
+import CreditsFooter from './CreditsFooter'
+
+const pageVariants = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+  exit: { opacity: 0, y: -8, transition: { duration: 0.2 } },
+}
+
+export default function AppContent() {
+  const location = useLocation()
+
+  return (
+    <div className="min-h-screen bg-background-primary flex flex-col">
+      <Navbar />
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={location.pathname}
+          variants={pageVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className={location.pathname === '/' ? 'min-h-screen flex-1' : 'min-h-[calc(100vh-4rem)] pt-16 flex-1'}
+        >
+          <Routes location={location}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              element={
+                <ProtectedRoute>
+                  <Outlet />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/map" element={<MapPage />} />
+              <Route path="/library" element={<LibraryPage />} />
+              <Route path="/library/:id" element={<RouteDetailPage />} />
+              <Route path="/education" element={<EducationPage />} />
+              <Route path="/before-you-go" element={<BeforeYouGoPage />} />
+              <Route path="/mike" element={<MikePage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+            </Route>
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </motion.div>
+      </AnimatePresence>
+      <CreditsFooter />
+    </div>
+  )
+}
