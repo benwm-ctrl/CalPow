@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+
+# Generated terrain tiles (large, rebuild with run_pipeline.py)
+data/
+outputs/
+
+# Virtual env
+venv/
+.venv/

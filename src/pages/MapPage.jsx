@@ -12,6 +12,9 @@ import AspectElevationRose from '../components/AspectElevationRose'
 import { fetchForecast, FALLBACK_URLS } from '../services/avalancheForecast'
 import { fetchWindGrid } from '../services/windService'
 import { analyzeSegments, calcRouteRiskScore, calcHazardExposure } from '../utils/dangerAnalysis'
+import AlgorithmicRoutePanel from '../components/AlgorithmicRoutePanel'
+import AnchorRoutePanel from '../components/AnchorRoutePanel'
+import { findEngineRoute } from '../services/engineApi'
 
 const SATELLITE_STYLE = 'mapbox://styles/mapbox/satellite-streets-v12'
 const TOPO_STYLE = 'mapbox://styles/mapbox/outdoors-v12'
@@ -213,6 +216,22 @@ export default function MapPage() {
   const [windElevation, setWindElevation] = useState('10m') // '10m' | '80m'
   const [windError, setWindError] = useState(false) // show "Wind data unavailable" toast
   const [precipRadarEnabled, setPrecipRadarEnabled] = useState(false)
+
+  // Engine (terrain-physics) route state
+  const [engineResult, setEngineResult]   = useState(null)
+  const [engineLoading, setEngineLoading] = useState(false)
+  const [engineError, setEngineError]     = useState(null)
+  const [enginePanelOpen, setEnginePanelOpen] = useState(false)
+
+  // ── Anchor-routing mode (algorithmic route between placed anchors) ──────────
+  const [anchorMode, setAnchorMode]       = useState(false)
+  const anchorModeRef                     = useRef(false)
+  const [anchors, setAnchors]             = useState([])   // [[lon, lat], ...]
+  const [segments, setSegments]           = useState([])   // [{status, result, error}, ...]
+  const anchorsRef                        = useRef([])
+  // Keep ref in sync
+  useEffect(() => { anchorModeRef.current = anchorMode }, [anchorMode])
+  useEffect(() => { anchorsRef.current = anchors }, [anchors])
   const [precipRadarLoading, setPrecipRadarLoading] = useState(false)
   const [precipRadarPath, setPrecipRadarPath] = useState(null) // RainViewer tile path, updated ~10min
   const [snowDepthEnabled, setSnowDepthEnabled] = useState(false)
@@ -625,6 +644,34 @@ export default function MapPage() {
       m.off('click', closeDangerPopup)
     }
   }, [mapReady])
+
+  // ── Anchor-mode map click handler ─────────────────────────────────────────
+  useEffect(() => {
+    if (!mapReady) return
+    let map = mapRef?.current
+    const cleanupRef = { current: null }
+
+    if (!map) {
+      const interval = setInterval(() => {
+        map = mapRef?.current
+        if (map) { clearInterval(interval); cleanupRef.current = register(map) }
+      }, 100)
+      return () => { clearInterval(interval); cleanupRef.current?.() }
+    }
+
+    cleanupRef.current = register(map)
+    return () => cleanupRef.current?.()
+
+    function register(map) {
+      const handler = (e) => {
+        if (!anchorModeRef.current) return
+        const { lng, lat } = e.lngLat
+        handleAddAnchor([lng, lat])
+      }
+      map.on('click', handler)
+      return () => map.off('click', handler)
+    }
+  }, [mapReady, mapRef, handleAddAnchor])
 
   useEffect(() => {
     const map = mapRef.current
@@ -1199,14 +1246,308 @@ export default function MapPage() {
     }
   }, [windVisible, windData, windElevation, mapReady, redrawWindCanvas])
 
+  // ── Anchor-routing helpers ───────────────────────────────────────────────────
+
+  // Compute one segment (index = segIdx, between anchors[segIdx] and anchors[segIdx+1])
+  // and update both segment state and map layers.
+  const computeSegment = useCallback(async (segIdx, fromPt, toPt, setSegs) => {
+    setSegs((prev) => {
+      const next = [...prev]
+      next[segIdx] = { status: 'loading', result: null, error: null }
+      return next
+    })
+    try {
+      const result = await findEngineRoute(fromPt, toPt)
+      setSegs((prev) => {
+        const next = [...prev]
+        next[segIdx] = { status: 'done', result, error: null }
+        return next
+      })
+      // Draw segment on map
+      const map = mapRef.current
+      if (map && result?.geometry?.geometry?.coordinates?.length) {
+        const coords  = result.geometry.geometry.coordinates
+        const geojson = { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }
+        const srcId   = `anchor-seg-${segIdx}`
+        if (map.getSource(srcId)) {
+          map.getSource(srcId).setData(geojson)
+        } else {
+          map.addSource(srcId, { type: 'geojson', data: geojson })
+          map.addLayer({
+            id: `${srcId}-glow`, type: 'line', source: srcId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#00D4FF', 'line-width': 8, 'line-opacity': 0.15, 'line-blur': 5 },
+          })
+          map.addLayer({
+            id: `${srcId}-line`, type: 'line', source: srcId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#00D4FF', 'line-width': 2.5, 'line-opacity': 0.9,
+                     'line-dasharray': [4, 2] },
+          })
+        }
+      }
+    } catch (err) {
+      setSegs((prev) => {
+        const next = [...prev]
+        next[segIdx] = { status: 'error', result: null, error: err.message ?? 'Engine error' }
+        return next
+      })
+    }
+  }, [mapRef])
+
+  // Remove segment map layers for a given index
+  const removeSegmentLayers = useCallback((segIdx) => {
+    const map = mapRef.current
+    if (!map) return
+    const srcId = `anchor-seg-${segIdx}`
+    try { if (map.getLayer(`${srcId}-line`)) map.removeLayer(`${srcId}-line`) } catch (_) {}
+    try { if (map.getLayer(`${srcId}-glow`)) map.removeLayer(`${srcId}-glow`) } catch (_) {}
+    try { if (map.getSource(srcId))          map.removeSource(srcId) } catch (_) {}
+  }, [mapRef])
+
+  // Add anchor (called when user clicks map in anchor mode)
+  const handleAddAnchor = useCallback((lonlat) => {
+    setAnchors((prev) => {
+      const next = [...prev, lonlat]
+      // If we now have ≥2 anchors, kick off a segment compute
+      if (next.length >= 2) {
+        const segIdx = next.length - 2
+        computeSegment(segIdx, next[segIdx], next[segIdx + 1], setSegments)
+      }
+      // Update anchor dots layer
+      const map = mapRef.current
+      if (map) {
+        const features = next.map(([lng, lat], i) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [lng, lat] },
+          properties: { label: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i] ?? String(i + 1) },
+        }))
+        const fc = { type: 'FeatureCollection', features }
+        if (map.getSource('anchor-dots')) {
+          map.getSource('anchor-dots').setData(fc)
+        } else {
+          map.addSource('anchor-dots', { type: 'geojson', data: fc })
+          map.addLayer({
+            id: 'anchor-dots-circle', type: 'circle', source: 'anchor-dots',
+            paint: { 'circle-radius': 7, 'circle-color': '#00D4FF',
+                     'circle-stroke-width': 1.5, 'circle-stroke-color': '#0A0F14' },
+          })
+          map.addLayer({
+            id: 'anchor-dots-label', type: 'symbol', source: 'anchor-dots',
+            layout: {
+              'text-field': ['get', 'label'],
+              'text-font': ['DIN Offc Pro Bold', 'Arial Unicode MS Bold'],
+              'text-size': 9, 'text-offset': [0, -0.1], 'text-anchor': 'center',
+            },
+            paint: { 'text-color': '#0A0F14' },
+          })
+        }
+      }
+      return next
+    })
+  }, [computeSegment, mapRef])
+
+  // Remove one anchor and clean up adjacent segments
+  const handleRemoveAnchor = useCallback((idx) => {
+    setAnchors((prev) => {
+      const next = [...prev]
+      next.splice(idx, 1)
+
+      // Remove the map layer for segment going INTO this anchor (idx-1 → idx)
+      if (idx > 0) removeSegmentLayers(idx - 1)
+      // Remove the map layer for segment going OUT of this anchor (idx → idx+1)
+      removeSegmentLayers(idx)
+
+      // Rebuild segments array: remove the two affected, shift indexes down
+      setSegments((prevSegs) => {
+        const newSegs = []
+        for (let i = 0; i < next.length - 1; i++) {
+          // If this is the newly adjacent pair (was separated by the removed anchor)
+          const wasAffected = (i === idx - 1)
+          if (wasAffected) {
+            // Recompute this segment between next[i] and next[i+1]
+            newSegs.push({ status: 'loading', result: null, error: null })
+            computeSegment(i, next[i], next[i + 1], setSegments)
+          } else {
+            // Move existing segment layer to new index if needed
+            const oldIdx = i < idx ? i : i + 1
+            newSegs.push(prevSegs[oldIdx] ?? { status: 'loading', result: null, error: null })
+          }
+        }
+        return newSegs
+      })
+
+      // Update anchor dots layer
+      const map = mapRef.current
+      if (map && map.getSource('anchor-dots')) {
+        const features = next.map(([lng, lat], i) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [lng, lat] },
+          properties: { label: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i] ?? String(i + 1) },
+        }))
+        map.getSource('anchor-dots').setData({ type: 'FeatureCollection', features })
+      }
+
+      return next
+    })
+  }, [computeSegment, removeSegmentLayers, mapRef])
+
+  // Clear all anchors and segment layers
+  const handleClearAnchors = useCallback(() => {
+    setAnchors((prev) => {
+      // Remove all segment layers
+      for (let i = 0; i < prev.length - 1; i++) removeSegmentLayers(i)
+      // Remove anchor dots
+      const map = mapRef.current
+      if (map) {
+        try { if (map.getLayer('anchor-dots-label'))  map.removeLayer('anchor-dots-label') } catch (_) {}
+        try { if (map.getLayer('anchor-dots-circle')) map.removeLayer('anchor-dots-circle') } catch (_) {}
+        try { if (map.getSource('anchor-dots'))       map.removeSource('anchor-dots') } catch (_) {}
+      }
+      return []
+    })
+    setSegments([])
+  }, [removeSegmentLayers, mapRef])
+
+  // ── Engine route handler ────────────────────────────────────────────────────
+  const handleFindRoute = useCallback(async () => {
+    if (!waypoints || waypoints.length < 2) return
+    const start = [waypoints[0][0], waypoints[0][1]]
+    const end   = [waypoints[waypoints.length - 1][0], waypoints[waypoints.length - 1][1]]
+
+    setEngineLoading(true)
+    setEngineError(null)
+    setEngineResult(null)
+    setEnginePanelOpen(true)
+
+    try {
+      const result = await findEngineRoute(start, end)
+      setEngineResult(result)
+
+      // Draw engine route on the map
+      const map = mapRef.current
+      if (map && result?.geometry?.geometry?.coordinates?.length) {
+        const coords = result.geometry.geometry.coordinates
+        const geojson = { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }
+
+        if (map.getSource('engine-route')) {
+          map.getSource('engine-route').setData(geojson)
+        } else {
+          map.addSource('engine-route', { type: 'geojson', data: geojson })
+          // Glow shadow
+          map.addLayer({
+            id: 'engine-route-glow',
+            type: 'line',
+            source: 'engine-route',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#22d3ee', 'line-width': 8, 'line-opacity': 0.18, 'line-blur': 4 },
+          })
+          // Main line
+          map.addLayer({
+            id: 'engine-route-line',
+            type: 'line',
+            source: 'engine-route',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': '#22d3ee',
+              'line-width': 2.5,
+              'line-opacity': 0.92,
+              'line-dasharray': [1, 0],
+            },
+          })
+          // Start dot
+          map.addLayer({
+            id: 'engine-route-start',
+            type: 'circle',
+            source: 'engine-route',
+            filter: ['==', '$type', 'LineString'],
+            paint: { 'circle-radius': 5, 'circle-color': '#22d3ee', 'circle-opacity': 0 },
+          })
+        }
+
+        // Fit map to route
+        const lngs = coords.map(c => c[0])
+        const lats  = coords.map(c => c[1])
+        map.fitBounds(
+          [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+          { padding: 80, duration: 800 }
+        )
+      }
+    } catch (err) {
+      setEngineError(err.message ?? 'Unknown engine error')
+    } finally {
+      setEngineLoading(false)
+    }
+  }, [waypoints, mapRef])
+
+
   return (
     <div className="w-full" style={{ position: 'relative', height: 'calc(100vh - 3.5rem)', overflow: 'visible' }}>
       <div
         ref={mapContainerRef}
         className="w-full h-full"
-        style={{ height: 'calc(100vh - 3.5rem)' }}
+        style={{ height: 'calc(100vh - 3.5rem)', cursor: anchorMode ? 'crosshair' : undefined }}
         aria-label="Map"
       />
+
+      {/* ── Anchor-routing left panel ──────────────────────────────────────── */}
+      {anchorMode && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, bottom: 0, zIndex: 30,
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '2px 0 16px rgba(0,0,0,0.5)',
+        }}>
+          <AnchorRoutePanel
+            anchors={anchors}
+            segments={segments}
+            onRemoveAnchor={handleRemoveAnchor}
+            onClearAll={handleClearAnchors}
+          />
+        </div>
+      )}
+
+      {/* ── Mode toggle button ─────────────────────────────────────────────── */}
+      {mapReady && (
+        <div style={{
+          position: 'absolute',
+          top: 12,
+          left: anchorMode ? 252 : 12,
+          zIndex: 40,
+          transition: 'left 0.25s ease',
+        }}>
+          <button
+            onClick={() => {
+              const next = !anchorMode
+              setAnchorMode(next)
+              if (!next) handleClearAnchors()
+            }}
+            style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              fontSize: 11,
+              background: anchorMode ? '#00D4FF' : 'rgba(10,15,20,0.92)',
+              color: anchorMode ? '#0A0F14' : '#00D4FF',
+              border: '1px solid #00D4FF',
+              padding: '5px 10px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+              stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="2" cy="10" r="1.5"/>
+              <circle cx="10" cy="2" r="1.5"/>
+              <path d="M2 8.5V6.5C2 4.5 3.5 4 6 4s4-.5 4-2.5"/>
+              <path d="M7.5 1L10 2.5 7.5 4"/>
+            </svg>
+            {anchorMode ? 'ALGO ON' : 'ALGO ROUTE'}
+          </button>
+        </div>
+      )}
 
       {/* Wind overlay canvas — only visible when zoom >= WIND_MIN_ZOOM (match terrain layers) */}
       {windEnabled && mapZoom >= WIND_MIN_ZOOM && (
@@ -1484,7 +1825,15 @@ export default function MapPage() {
                     Select a terrain layer
                   </span>
                 )}
-              </>
+                {enginePanelOpen && (
+            <AlgorithmicRoutePanel
+              result={engineResult}
+              loading={engineLoading}
+              error={engineError}
+              onClose={() => setEnginePanelOpen(false)}
+            />
+          )}
+        </>
             )}
           </div>
 
@@ -1713,21 +2062,30 @@ export default function MapPage() {
               />
             )}
           </div>
-          <motion.div
-            initial={{ opacity: 0, x: 12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
-          >
-            <RouteBuilder mapRef={mapRef} mapReady={mapReady} />
-          </motion.div>
-          <DangerSummary
-            dangerSegments={dangerSegments}
-            routeRisk={routeRisk}
-            hazardExposure={hazardExposure ?? '0.00'}
-            hasRoute={waypoints.length >= 2}
-            mapRef={mapRef}
-            setSelectedDangerSeg={setSelectedDangerSeg}
-          />
+          {!anchorMode && (
+            <>
+              <motion.div
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.4, delay: 0.2 }}
+              >
+                <RouteBuilder
+                    mapRef={mapRef}
+                    mapReady={mapReady}
+                    onFindRoute={handleFindRoute}
+                    engineLoading={engineLoading}
+                  />
+              </motion.div>
+              <DangerSummary
+                dangerSegments={dangerSegments}
+                routeRisk={routeRisk}
+                hazardExposure={hazardExposure ?? '0.00'}
+                hasRoute={waypoints.length >= 2}
+                mapRef={mapRef}
+                setSelectedDangerSeg={setSelectedDangerSeg}
+              />
+            </>
+          )}
         </>
       )}
 

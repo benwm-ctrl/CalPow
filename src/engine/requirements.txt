@@ -1,0 +1,40 @@
+# CalPow Engine — Python terrain pipeline
+# Install: pip install -r requirements.txt
+#
+# Note on GDAL: rasterio bundles its own GDAL on most platforms.
+# If you hit GDAL errors, install via conda:
+#   conda install -c conda-forge rasterio whitebox avaframe
+
+# Core raster I/O
+rasterio>=1.4
+rioxarray>=0.17
+numpy>=1.26,<2.0          # avaframe requires <2.0
+scipy>=1.12
+shapely>=2.0
+
+# DEM download (wraps USGS 3DEP WCS)
+py3dep>=0.18
+
+# Terrain derivatives
+whitebox>=2.3             # WhiteboxTools Python wrapper, MIT license
+
+# Solar position
+pvlib>=0.10
+
+# Routing
+scikit-image>=0.22        # skimage.graph.MCP_Geometric
+
+# HTTP / utilities
+requests>=2.31
+tqdm>=4.66
+
+# Visualisation (validation only, not production)
+matplotlib>=3.8
+
+# API layer
+fastapi>=0.111
+uvicorn[standard]>=0.29
+pydantic>=2.7                 # FastAPI v0.111 requires Pydantic v2
+
+# Optional: full AvaFrame (needs GDAL via conda)
+# avaframe>=2.1
