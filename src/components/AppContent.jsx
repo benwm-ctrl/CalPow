@@ -1,6 +1,5 @@
-import { useLocation, Routes, Route, Outlet } from 'react-router-dom'
+import { useLocation, Routes, Route } from 'react-router-dom'
 import Navbar from './Navbar'
-import ProtectedRoute from './ProtectedRoute'
 import HomePage from '../pages/HomePage'
 import LoginPage from '../pages/LoginPage'
 import MapPage from '../pages/MapPage'
@@ -23,21 +22,13 @@ export default function AppContent() {
         <Routes location={location}>
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <Outlet />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/map" element={<MapPage />} />
-            <Route path="/library" element={<LibraryPage />} />
-            <Route path="/library/:id" element={<RouteDetailPage />} />
-            <Route path="/education" element={<EducationPage />} />
-            <Route path="/before-you-go" element={<BeforeYouGoPage />} />
-            <Route path="/mike" element={<MikePage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-          </Route>
+          <Route path="/map" element={<MapPage />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route path="/library/:id" element={<RouteDetailPage />} />
+          <Route path="/education" element={<EducationPage />} />
+          <Route path="/before-you-go" element={<BeforeYouGoPage />} />
+          <Route path="/mike" element={<MikePage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </div>
