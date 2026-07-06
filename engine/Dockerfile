@@ -25,7 +25,8 @@ RUN pip install --no-cache-dir \
     "fastapi>=0.111" \
     "uvicorn[standard]>=0.29" \
     "pydantic>=2.7" \
-    "tqdm>=4.66"
+    "tqdm>=4.66" \
+    "pyproj>=3.6"
 
 # Copy engine source (demo_data/ included — bundled synthetic tiles)
 COPY . .
