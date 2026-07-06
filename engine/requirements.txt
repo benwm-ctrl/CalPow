@@ -22,6 +22,7 @@ whitebox>=2.3             # WhiteboxTools Python wrapper, MIT license
 pvlib>=0.10
 
 # Routing
+pyproj>=3.6               # CRS transforms in lcp.py
 scikit-image>=0.22        # skimage.graph.MCP_Geometric
 
 # HTTP / utilities
